@@ -15,33 +15,11 @@ WORK="$(cd "$1" && pwd)"
 : "${GODOT_EDITOR:?}" "${GODOT_TEMPLATE:?}"
 log() { echo "==> $*"; }
 
-rm -rf "$WORK"/{src,steam,prepare,aot,run,home}
-mkdir -p "$WORK/src" "$WORK/steam/data_sts2_windows_x86_64" "$WORK/run" "$WORK/home"
+rm -rf "$WORK"/{steam,prepare,aot,run,home}
+mkdir -p "$WORK/run" "$WORK/home"
 
 log "Building the fake game"
-cp -r "$IOS/test/fakegame" "$IOS/test/fakesteam" "$WORK/src/"
-dotnet build "$WORK/src/fakegame/sts2.csproj" -c ExportRelease -nologo -v q
-BIN="$WORK/src/fakegame/.godot/mono/temp/bin/ExportRelease"
-
-# Lay it out like the Windows depot: managed DLLs mixed with runtime and
-# native files that select_assemblies.py has to skip.
-DATA="$WORK/steam/data_sts2_windows_x86_64"
-cp "$BIN"/*.dll "$DATA/"
-FRAMEWORK="$(dirname "$(dotnet --list-runtimes | awk '$1 == "Microsoft.NETCore.App" { gsub(/[\[\]]/, "", $3); print $3 "/" $2 "/x" }' | tail -1)")"
-cp "$FRAMEWORK/System.Runtime.dll" "$DATA/"
-head -c 4096 /dev/urandom > "$DATA/steam_api64.dll"
-echo '{"version": "v0.0.0-fake"}' > "$WORK/steam/release_info.json"
-
-log "Packing the fake game's SlayTheSpire2.pck"
-PACK="$WORK/src/pack"
-mkdir -p "$PACK/scenes" "$PACK/src" "$PACK/addons/sentry"
-printf 'extends SceneTree\nfunc _init():\n\tProjectSettings.save_custom(OS.get_environment("OUT"))\n\tquit()\n' > "$WORK/src/fakegame/save_settings.gd"
-OUT="$PACK/project.binary" HOME="$WORK/home" "$GODOT_EDITOR" --headless --path "$WORK/src/fakegame" --script res://save_settings.gd >/dev/null 2>&1 || true
-python3 "$IOS/tools/projbin.py" edit "$PACK/project.binary" "$PACK/project.binary" --set-string _custom_features=dotnet
-cp "$WORK/src/fakegame/scenes/game.tscn" "$PACK/scenes/"
-cp "$WORK/src/fakegame/src/"*.cs "$PACK/src/"
-cp "$WORK/src/fakegame/addons/sentry/SentryInit.gd" "$PACK/addons/sentry/"
-python3 "$IOS/tools/pck.py" build "$WORK/steam/SlayTheSpire2.pck" "$PACK"
+GODOT="$GODOT_EDITOR" "$IOS/scripts/make-fake-game.sh" "$WORK/steam"
 
 log "prepare-game.sh"
 "$IOS/scripts/prepare-game.sh" "$WORK/steam" "$WORK/prepare"

@@ -4,8 +4,13 @@
 # runner. Sign and install the result from Windows/Linux with Sideloadly.
 #
 # Usage: build-godot-ios.sh <project_dir> <binary_name> <out_dir>
-# Env:   GODOT  path to the Godot 4.5.1 mono editor binary (required)
+# Env:   GODOT              path to the Godot 4.5.1 mono editor binary (required)
+#        BOOTSTRAP_OVERLAY  optional: rebuild the exported pack with
+#                           ios/tools/make_bootstrap.py and this overlay folder
+#        APP_EXTRA_DIR      optional: files to copy next to the app executable
 set -euo pipefail
+
+IOS_DIR="$(cd "$(dirname "$0")/.." && pwd)"
 
 PROJECT_DIR="$(cd "$1" && pwd)"
 BINARY_NAME="$2"
@@ -45,6 +50,14 @@ if [ ! -d "$OUT_DIR/$BINARY_NAME.xcodeproj" ]; then
     exit 1
 fi
 
+if [ -n "${BOOTSTRAP_OVERLAY:-}" ]; then
+    EXPORTED_PCK="$(find "$OUT_DIR" -maxdepth 2 -name "$BINARY_NAME.pck" | head -1)"
+    [ -n "$EXPORTED_PCK" ] || { echo "ERROR: exported $BINARY_NAME.pck not found" >&2; exit 1; }
+    log "Building bootstrap pack in place of $EXPORTED_PCK"
+    python3 "$IOS_DIR/tools/make_bootstrap.py" --base "$EXPORTED_PCK" --overlay "$BOOTSTRAP_OVERLAY" \
+        --out "$EXPORTED_PCK" 2>&1 | tee "$LOG_DIR/bootstrap.log"
+fi
+
 # 4. Compile the app with signing disabled. Sideloadly signs it later.
 log "Building app with xcodebuild (unsigned)"
 DERIVED="$OUT_DIR/DerivedData"
@@ -78,6 +91,10 @@ if [ ! -f "$APP/Frameworks/$ASSEMBLY.framework/$ASSEMBLY" ] && [ ! -f "$APP/Fram
     exit 1
 fi
 
+if [ -n "${APP_EXTRA_DIR:-}" ] && [ -d "$APP_EXTRA_DIR" ]; then
+    cp -R "$APP_EXTRA_DIR"/. "$APP/"
+fi
+
 # 5. Package as .ipa (a zip with Payload/<App>.app).
 log "Packaging $APP"
 STAGE="$OUT_DIR/ipa-stage"
@@ -88,5 +105,5 @@ rm -f "$OUT_DIR/$BINARY_NAME.ipa"
 rm -rf "$STAGE"
 
 log "App bundle contents:"
-find "$APP" -maxdepth 2 \( -name '*.framework' -o -name '*.pck' -o -name '*.dylib' -o -name 'Info.plist' \) -exec du -sh {} + | sed "s|$APP/||"
+find "$APP" -maxdepth 2 \( -name '*.framework' -o -name '*.pck' -o -name '*.dylib' -o -name '*.json' -o -name 'Info.plist' \) -exec du -sh {} + | sed "s|$APP/||"
 log "Done: $OUT_DIR/$BINARY_NAME.ipa ($(du -h "$OUT_DIR/$BINARY_NAME.ipa" | cut -f1))"

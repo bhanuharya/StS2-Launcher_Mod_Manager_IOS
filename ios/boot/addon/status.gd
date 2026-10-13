@@ -41,7 +41,7 @@ func _ready() -> void:
 	body.autowrap_mode = TextServer.AUTOWRAP_WORD_SMART
 	body.add_theme_font_size_override("font_size", 28)
 	body.text = message + "\n\nIn the Files app: On My iPhone > " \
-		+ str(ProjectSettings.get_setting("application/config/name", "this app")) \
+		+ str(ProjectSettings.get_setting("ios_boot/app_name", "this app")) \
 		+ " > " + path.get_file()
 	box.add_child(body)
 

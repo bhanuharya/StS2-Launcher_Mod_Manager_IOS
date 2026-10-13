@@ -29,8 +29,17 @@ DATA_DIR="$(find "$GAME_DIR" -maxdepth 1 -type d -name 'data_*' | head -1)"
 
 # Shared framework folder, used to tell the game's DLLs apart from the .NET
 # runtime it ships. Prefer 9.x (the game's target).
-FRAMEWORK_DIR="$(dotnet --list-runtimes | awk '$1 == "Microsoft.NETCore.App" { gsub(/[\[\]]/, "", $3); print $3 "/" $2 }' \
-    | sort -V | awk '/\/9\./ { nine = $0 } { last = $0 } END { print (nine != "" ? nine : last) }')"
+FRAMEWORK_DIR="$(dotnet --list-runtimes | python3 -c '
+import re, sys
+found = []
+for line in sys.stdin:
+    m = re.match(r"Microsoft\.NETCore\.App (\S+) \[(.+)\]", line.strip())
+    if m:
+        found.append((tuple(int(x) for x in re.findall(r"\d+", m.group(1))[:3]), m.group(2) + "/" + m.group(1)))
+found.sort()
+nine = [p for v, p in found if v[0] == 9]
+print((nine or [p for _, p in found] or [""])[-1])
+')"
 [ -d "$FRAMEWORK_DIR" ] || fail "no Microsoft.NETCore.App runtime found"
 
 rm -rf "$WORK/assemblies" "$WORK/prebuilt" "$WORK/bootstrap" "$WORK/app-extra" "$WORK/pck-meta"

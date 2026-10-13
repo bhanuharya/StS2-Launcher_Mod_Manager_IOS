@@ -17,6 +17,7 @@ public partial class NGame : Node
         + "{\"filename\":\"a.png\",\"region\":{\"x\":0,\"y\":0,\"w\":32,\"h\":32}},"
         + "{\"filename\":\"b.png\",\"region\":{\"x\":32,\"y\":0,\"w\":64,\"h\":64}}]}]}";
 
+    private readonly System.Text.StringBuilder _report = new();
     private bool _ok = true;
 
     public override async void _Ready()
@@ -62,7 +63,21 @@ public partial class NGame : Node
         }
 
         GD.Print($"FAKEGAME RESULT {(_ok ? "PASS" : "FAIL")}");
-        GetTree().Quit(_ok ? 0 : 1);
+        _report.AppendLine($"RESULT {(_ok ? "PASS" : "FAIL")}");
+
+        // Headless rehearsals quit with a status code; on a phone, show it.
+        if (OS.HasFeature("mobile"))
+            ShowReport();
+        else
+            GetTree().Quit(_ok ? 0 : 1);
+    }
+
+    private void ShowReport()
+    {
+        var label = new Label { Text = _report.ToString(), Position = new Vector2(48, 48) };
+        label.AddThemeFontSizeOverride("font_size", 28);
+        AddChild(new CanvasLayer());
+        GetChild(GetChildCount() - 1).AddChild(label);
     }
 
     private async Task<bool> InitializePlatform()
@@ -87,6 +102,7 @@ public partial class NGame : Node
     private void Check(string name, bool pass, string detail)
     {
         GD.Print($"FAKEGAME {name}: {(pass ? "ok" : "FAIL")} ({detail})");
+        _report.AppendLine($"{name}: {(pass ? "ok" : "FAIL")} ({detail})");
         _ok &= pass;
     }
 }

@@ -31,6 +31,12 @@
          a dependency and the .deps.json gets this project's name twice.
          NativeAOT doesn't use .deps.json. -->
     <GenerateDependencyFile>false</GenerateDependencyFile>
+    <!-- The game was never written for trimming/AOT, so its analysis warnings
+         aren't actionable (runtime testing is), and they would list game
+         members by the thousand in the public CI log. -->
+    <TrimmerSingleWarn>true</TrimmerSingleWarn>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <SuppressAotAnalysisWarnings>true</SuppressAotAnalysisWarnings>
   </PropertyGroup>
 
   <!-- iOS gets these from Godot.NET.Sdk (iOSNativeAOT.props/targets).
