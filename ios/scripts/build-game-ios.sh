@@ -59,4 +59,16 @@ for required in \
     fi
 done
 grep "Frameworks/" <<<"$APP_LIST" | awk '{print $4}' | sed 's|.*\.app/||' | cut -d/ -f1-2 | sort -u
+
+# libGodotFmod is linked at launch and resolves load_all_fmod_plugins from the
+# main executable (FMOD's export plugin generates it). Without it the app dies
+# at launch with "Symbol not found", so check before shipping.
+CHECK="$(mktemp -d)"
+unzip -q -o "$OUT/StS2.ipa" 'Payload/*.app/StS2' -d "$CHECK"
+if ! xcrun nm -gU "$CHECK"/Payload/*.app/StS2 | grep -q ' _load_all_fmod_plugins$'; then
+    echo "ERROR: app executable doesn't export load_all_fmod_plugins (FMOD export plugin didn't run?)" >&2
+    exit 1
+fi
+rm -rf "$CHECK"
+log "load_all_fmod_plugins is exported by the app executable"
 log "Built StS2.ipa for game $GAME_VERSION (expects SlayTheSpire2.pck of $PCK_SIZE bytes)"

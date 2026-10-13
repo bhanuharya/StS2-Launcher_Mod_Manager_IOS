@@ -23,6 +23,13 @@ window/ios/suppress_ui_gesture=true
 
 project/assembly_name="sts2"
 
+[editor_plugins]
+
+; FMOD's editor plugin registers its export plugin, which writes
+; load_all_fmod_plugins into the Xcode project (dummy.cpp). The iOS FMOD
+; library is linked at launch and needs that symbol in the main executable.
+enabled=PackedStringArray("res://addons/fmod/plugin.cfg")
+
 [rendering]
 
 textures/vram_compression/import_etc2_astc=true
