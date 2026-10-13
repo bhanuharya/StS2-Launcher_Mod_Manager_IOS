@@ -65,7 +65,9 @@ grep "Frameworks/" <<<"$APP_LIST" | awk '{print $4}' | sed 's|.*\.app/||' | cut 
 # at launch with "Symbol not found", so check before shipping.
 CHECK="$(mktemp -d)"
 unzip -q -o "$OUT/StS2.ipa" 'Payload/*.app/StS2' -d "$CHECK"
-if ! xcrun nm -gU "$CHECK"/Payload/*.app/StS2 | grep -q ' _load_all_fmod_plugins$'; then
+# Capture first: grep -q would close the pipe early and pipefail would report nm's SIGPIPE.
+EXPORTS="$(xcrun nm -gU "$CHECK"/Payload/*.app/StS2)"
+if ! grep -q ' _load_all_fmod_plugins$' <<<"$EXPORTS"; then
     echo "ERROR: app executable doesn't export load_all_fmod_plugins (FMOD export plugin didn't run?)" >&2
     exit 1
 fi
