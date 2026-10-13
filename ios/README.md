@@ -35,7 +35,10 @@ zip → unsigned .ipa                          with your Apple ID             th
 ```
 
 A free Apple ID signature lasts **7 days** and allows 3 sideloaded apps at
-once. Re-run Sideloadly weekly to refresh it. Your saves survive a refresh.
+once (and 10 new bundle IDs per week, so we keep the bundle ID fixed). Re-run
+Sideloadly weekly to refresh it. Your saves survive a refresh. If you'd rather
+refresh from the phone itself, SideStore is an alternative. Its one-time setup
+needs a PC; after that it can refresh on-device.
 
 ## Phase 0: probe app (do this first)
 

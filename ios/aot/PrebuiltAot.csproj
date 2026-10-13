@@ -1,0 +1,44 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <!--
+    NativeAOT-compiles an assembly that was built elsewhere (the game's
+    sts2.dll) without its source. Nothing is compiled here: right after
+    CoreCompile the prebuilt DLL overwrites this project's own output, and
+    ILC then compiles it as the main assembly. The Godot source generators
+    already put the `godotsharp_game_main_init` entry point into the game
+    assembly, and NativeAOT exports it from the resulting dylib.
+
+    Copy or rename this file to <AssemblyName>.csproj (e.g. sts2.csproj) so
+    TargetName matches the assembly name Godot looks up at runtime.
+
+    Verified on linux-x64 (2026-10-13): the stock 4.5.1 mono release template
+    booted the resulting .so from a prebuilt probe DLL, and the scripts,
+    reflection, ICU, and thread pool all worked with no JIT.
+
+    Usage:
+      dotnet publish sts2.csproj -c ExportRelease -r ios-arm64 \
+        -p:PrebuiltDir=/path/to/patched/assemblies
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PrebuiltDir Condition=" '$(PrebuiltDir)' == '' ">$(MSBuildProjectDirectory)/prebuilt</PrebuiltDir>
+    <PrebuiltAssembly>$(PrebuiltDir)/$(AssemblyName).dll</PrebuiltAssembly>
+  </PropertyGroup>
+
+  <!-- iOS gets these from Godot.NET.Sdk (iOSNativeAOT.props/targets).
+       Set them for other RIDs so the pipeline can be smoke-tested on Linux. -->
+  <PropertyGroup Condition=" '$(GodotTargetPlatform)' != 'ios' ">
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup Condition=" '$(GodotTargetPlatform)' != 'ios' ">
+    <TrimmerRootAssembly Include="GodotSharp" />
+    <TrimmerRootAssembly Include="$(TargetName)" />
+  </ItemGroup>
+
+  <Target Name="UsePrebuiltAssembly" AfterTargets="CoreCompile">
+    <Error Condition="!Exists('$(PrebuiltAssembly)')" Text="Prebuilt assembly not found: $(PrebuiltAssembly)" />
+    <Copy SourceFiles="$(PrebuiltAssembly)" DestinationFiles="@(IntermediateAssembly)" />
+    <Message Importance="high" Text="NativeAOT input: $(PrebuiltAssembly)" />
+  </Target>
+</Project>
