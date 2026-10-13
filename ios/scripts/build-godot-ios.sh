@@ -67,6 +67,16 @@ if [ -z "$APP" ]; then
     exit 1
 fi
 
+# Godot skips the C# export step without complaint when it doesn't detect a
+# .NET project (it looks for <assembly>.sln). The app would then crash at
+# launch, so require the NativeAOT library to be in the bundle.
+ASSEMBLY="$(basename "$CSPROJ" .csproj)"
+if [ ! -f "$APP/Frameworks/$ASSEMBLY.dylib" ]; then
+    echo "ERROR: $ASSEMBLY.dylib (NativeAOT C#) missing from $APP/Frameworks" >&2
+    ls -la "$APP" "$APP/Frameworks" 2>&1 || true
+    exit 1
+fi
+
 # 5. Package as .ipa (a zip with Payload/<App>.app).
 log "Packaging $APP"
 STAGE="$OUT_DIR/ipa-stage"
@@ -77,5 +87,5 @@ rm -f "$OUT_DIR/$BINARY_NAME.ipa"
 rm -rf "$STAGE"
 
 log "App bundle contents:"
-find "$APP" -maxdepth 2 \( -name '*.framework' -o -name '*.pck' -o -name '*.dylib' -o -name 'Info.plist' \) | sed "s|$APP/||"
+find "$APP" -maxdepth 2 \( -name '*.framework' -o -name '*.pck' -o -name '*.dylib' -o -name 'Info.plist' \) -exec du -sh {} + | sed "s|$APP/||"
 log "Done: $OUT_DIR/$BINARY_NAME.ipa ($(du -h "$OUT_DIR/$BINARY_NAME.ipa" | cut -f1))"
