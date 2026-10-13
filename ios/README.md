@@ -77,7 +77,7 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 ### Build
 
 1. **Actions → "iOS game build" → Run workflow.** Pick branch
-   `claude/sts2-ipad-port-vb8peo`, source `steam`, and Steam branch `public`
+   `main`, source `steam`, and Steam branch `public`
    (or the beta you play).
 2. When the **Download game from Steam** step starts, open the Steam app on
    your phone and **approve the sign-in**.
