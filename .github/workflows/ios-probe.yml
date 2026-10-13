@@ -1,0 +1,77 @@
+name: iOS probe (phase 0)
+
+# Builds ios/probe, a tiny Godot 4.5.1 C# app, into an unsigned .ipa on a
+# GitHub macOS runner. Sideload it with Sideloadly (Windows/macOS) to confirm
+# the no-Mac pipeline works on your device before any game files are involved.
+# No secrets and no game content: the artifact is safe in a public repo.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ios/probe/**"
+      - "ios/scripts/build-godot-ios.sh"
+      - ".github/workflows/ios-probe.yml"
+
+permissions:
+  contents: read
+
+env:
+  GODOT_VERSION: "4.5.1"
+  GODOT_BASE_URL: https://github.com/godotengine/godot/releases/download/4.5.1-stable
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache Godot editor + iOS template
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-cache
+          key: godot-${{ env.GODOT_VERSION }}-mono-macos-ios-v1
+
+      - name: Download Godot editor + iOS template
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-cache && cd ~/godot-cache
+          curl -fsSL -o editor.zip "$GODOT_BASE_URL/Godot_v${GODOT_VERSION}-stable_mono_macos.universal.zip"
+          unzip -q editor.zip && rm editor.zip
+          curl -fsSL -o templates.tpz "$GODOT_BASE_URL/Godot_v${GODOT_VERSION}-stable_mono_export_templates.tpz"
+          # Only the iOS template is needed; the full .tpz is ~1 GB.
+          unzip -q templates.tpz templates/ios.zip templates/version.txt && rm templates.tpz
+          ls -la ~/godot-cache ~/godot-cache/templates
+
+      - name: Install Godot
+        run: |
+          TPL_DIR="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable.mono"
+          mkdir -p "$TPL_DIR"
+          cp ~/godot-cache/templates/* "$TPL_DIR/"
+          echo "GODOT=$HOME/godot-cache/Godot_mono.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+
+      - name: Build unsigned IPA
+        run: ios/scripts/build-godot-ios.sh ios/probe StS2Probe build/ios
+
+      - name: Upload IPA
+        uses: actions/upload-artifact@v4
+        with:
+          name: StS2Probe-ipa
+          path: build/ios/StS2Probe.ipa
+          if-no-files-found: error
+          retention-days: 14
+
+      - name: Upload logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StS2Probe-logs
+          path: build/ios/logs
+          if-no-files-found: ignore
+          retention-days: 14

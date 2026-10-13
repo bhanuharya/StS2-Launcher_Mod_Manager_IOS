@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024">
+  <rect width="1024" height="1024" fill="#1b1f2a"/>
+  <rect x="312" y="232" width="400" height="560" rx="48" fill="#c0392b" stroke="#f1c40f" stroke-width="24"/>
+  <text x="512" y="560" font-family="Helvetica, Arial, sans-serif" font-size="180" font-weight="bold" fill="#f1c40f" text-anchor="middle">iOS</text>
+</svg>
