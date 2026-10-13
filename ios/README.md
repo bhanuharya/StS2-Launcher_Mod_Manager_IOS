@@ -113,6 +113,18 @@ along with a screenshot.
 Your saves are in the same folder, so copy them somewhere safe before
 deleting the app.
 
+## Performance
+
+- **Game code:** NativeAOT compiles it to native ARM64 before install. There's
+  no JIT warm-up and no interpreter, so this is the fastest option available on iOS.
+- **Textures matter most.** The PC `.pck` uses BC-compressed textures. If the
+  probe reports `Texture BC7: YES`, they load as they are. If it says `NO`,
+  Godot expands them in memory: loads get slower and memory use goes up a lot.
+  In that case a build step will convert them to ASTC, the phone's native
+  format (planned, only if needed).
+- **First-run hitches:** Godot compiles each graphics pipeline the first time
+  an effect appears and caches it, so the first fights may stutter briefly.
+
 ## Phase 2: playability
 
 Port the most important mobile fixes from the Android patches as IL patches:
