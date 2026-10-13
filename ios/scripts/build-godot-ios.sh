@@ -69,10 +69,11 @@ fi
 
 # Godot skips the C# export step without complaint when it doesn't detect a
 # .NET project (it looks for <assembly>.sln). The app would then crash at
-# launch, so require the NativeAOT library to be in the bundle.
+# launch, so require the NativeAOT library to be in the bundle. The export
+# converts the dylib into <assembly>.framework, and the runtime accepts either.
 ASSEMBLY="$(basename "$CSPROJ" .csproj)"
-if [ ! -f "$APP/Frameworks/$ASSEMBLY.dylib" ]; then
-    echo "ERROR: $ASSEMBLY.dylib (NativeAOT C#) missing from $APP/Frameworks" >&2
+if [ ! -f "$APP/Frameworks/$ASSEMBLY.framework/$ASSEMBLY" ] && [ ! -f "$APP/Frameworks/$ASSEMBLY.dylib" ]; then
+    echo "ERROR: NativeAOT C# library for $ASSEMBLY missing from $APP/Frameworks" >&2
     ls -la "$APP" "$APP/Frameworks" 2>&1 || true
     exit 1
 fi
