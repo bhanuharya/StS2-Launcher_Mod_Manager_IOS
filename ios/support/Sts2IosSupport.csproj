@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    Managed side of the iOS port. ios/tools/IlPatcher wires these hooks into
+    sts2.dll, and NativeAOT compiles both into the same image. It needs the
+    game's assemblies to compile: pass -p:GameDir=<dir with sts2.dll>.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>Sts2IosSupport</AssemblyName>
+    <RootNamespace>Sts2Ios</RootNamespace>
+    <Nullable>disable</Nullable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <GameDir Condition=" '$(GameDir)' == '' ">$(MSBuildProjectDirectory)/../../build/game/assemblies</GameDir>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="GodotSharp" Version="4.5.1" />
+    <Reference Include="sts2">
+      <HintPath>$(GameDir)/sts2.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="Steamworks.NET">
+      <HintPath>$(GameDir)/Steamworks.NET.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+</Project>

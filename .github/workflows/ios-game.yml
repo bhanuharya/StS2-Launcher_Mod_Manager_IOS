@@ -1,0 +1,179 @@
+name: iOS game build
+
+# Builds StS2.ipa from your own copy of Slay the Spire 2 on a GitHub macOS
+# runner: game files from Steam, patched and compiled ahead of time for iOS.
+# See ios/README.md.
+#
+# Actions > "iOS game build" > Run workflow, source = steam:
+#   logs into Steam with the STEAM_USERNAME / STEAM_PASSWORD secrets. Approve
+#   the sign-in in the Steam mobile app while "Download game from Steam" runs.
+#   The .ipa holds compiled game code and this repo is public, so it is only
+#   uploaded inside a zip encrypted with the IPA_PASSWORD secret.
+#
+# Pushes to ios/** run source = fake: the same pipeline on the stand-in game
+# in ios/test, with no secrets and no game files, to catch breakage early.
+
+on:
+  workflow_dispatch:
+    inputs:
+      source:
+        description: "steam = your game via Steam login, fake = pipeline self-test"
+        type: choice
+        options: [steam, fake]
+        default: steam
+      steam_branch:
+        description: "Steam branch to download (public, public-beta, ...)"
+        default: public
+  push:
+    paths:
+      - "ios/**"
+      - "!ios/probe/**"
+      - "!ios/README.md"
+      - "src/stubs/**"
+      - ".github/workflows/ios-game.yml"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ios-game-${{ github.ref }}-${{ github.event_name }}
+  cancel-in-progress: true
+
+env:
+  GODOT_VERSION: "4.5.1"
+  GODOT_BASE_URL: https://github.com/godotengine/godot/releases/download/4.5.1-stable
+  DEPOTDOWNLOADER_URL: https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip
+  STS2_APP_ID: "2868840"
+  SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source || 'fake' }}
+
+jobs:
+  build:
+    runs-on: macos-15
+    timeout-minutes: 120
+    steps:
+      - name: Check secrets
+        if: env.SOURCE == 'steam'
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+          IPA_PASSWORD: ${{ secrets.IPA_PASSWORD }}
+        run: |
+          missing=""
+          [ -n "$STEAM_USERNAME" ] || missing="$missing STEAM_USERNAME"
+          [ -n "$STEAM_PASSWORD" ] || missing="$missing STEAM_PASSWORD"
+          [ -n "$IPA_PASSWORD" ] || missing="$missing IPA_PASSWORD"
+          if [ -n "$missing" ]; then
+            echo "::error::Add these repository secrets (Settings > Secrets and variables > Actions):$missing"
+            exit 1
+          fi
+
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Cache Godot editor + iOS template
+        id: godot-cache
+        uses: actions/cache@v4
+        with:
+          path: ~/godot-cache
+          key: godot-${{ env.GODOT_VERSION }}-mono-macos-ios-v1
+
+      - name: Download Godot editor + iOS template
+        if: steps.godot-cache.outputs.cache-hit != 'true'
+        run: |
+          mkdir -p ~/godot-cache && cd ~/godot-cache
+          curl -fsSL -o editor.zip "$GODOT_BASE_URL/Godot_v${GODOT_VERSION}-stable_mono_macos.universal.zip"
+          unzip -q editor.zip && rm editor.zip
+          curl -fsSL -o templates.tpz "$GODOT_BASE_URL/Godot_v${GODOT_VERSION}-stable_mono_export_templates.tpz"
+          unzip -q templates.tpz templates/ios.zip templates/version.txt && rm templates.tpz
+
+      - name: Install Godot
+        run: |
+          TPL_DIR="$HOME/Library/Application Support/Godot/export_templates/${GODOT_VERSION}.stable.mono"
+          mkdir -p "$TPL_DIR"
+          cp ~/godot-cache/templates/* "$TPL_DIR/"
+          echo "GODOT=$HOME/godot-cache/Godot_mono.app/Contents/MacOS/Godot" >> "$GITHUB_ENV"
+
+      - name: Cache FMOD/Spine downloads
+        uses: actions/cache@v4
+        with:
+          path: ~/ext-cache
+          key: gdext-fmod-6.1.0-4.5.0-spine-4.2-4.5.1-v1
+
+      - name: Download game from Steam
+        if: env.SOURCE == 'steam'
+        timeout-minutes: 20
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+          STEAM_BRANCH: ${{ inputs.steam_branch }}
+        run: |
+          curl -fsSL -o "$RUNNER_TEMP/dd.zip" "$DEPOTDOWNLOADER_URL"
+          mkdir -p ~/depotdownloader
+          unzip -q -o "$RUNNER_TEMP/dd.zip" -d ~/depotdownloader
+          chmod +x ~/depotdownloader/DepotDownloader
+          # Only what the build needs: the assemblies, the pck (for its project
+          # settings; it is not uploaded), and release_info.json.
+          printf '%s\n' 'regex:^data_[^/]+/[^/]+\.dll$' 'regex:^[^/]+\.pck$' 'release_info.json' > "$RUNNER_TEMP/files.txt"
+          echo "::notice::Approve the Steam sign-in in your Steam mobile app now. This step waits for it."
+          ~/depotdownloader/DepotDownloader -app "$STS2_APP_ID" -os windows -osarch 64 \
+            -branch "${STEAM_BRANCH:-public}" -username "$STEAM_USERNAME" -password "$STEAM_PASSWORD" \
+            -filelist "$RUNNER_TEMP/files.txt" -dir "$HOME/game" -max-downloads 16 < /dev/null
+          ls -la "$HOME/game"
+          if [ ! -f "$HOME/game/SlayTheSpire2.pck" ]; then
+            echo "::error::SlayTheSpire2.pck was not downloaded (wrong branch, or the account doesn't own the game?)"
+            exit 1
+          fi
+
+      - name: Build the fake game
+        if: env.SOURCE == 'fake'
+        run: ios/scripts/make-fake-game.sh "$HOME/game"
+
+      - name: Build StS2.ipa
+        run: EXT_CACHE="$HOME/ext-cache" ios/scripts/build-game-ios.sh "$HOME/game" build/game
+
+      - name: Encrypt IPA
+        if: env.SOURCE == 'steam'
+        env:
+          IPA_PASSWORD: ${{ secrets.IPA_PASSWORD }}
+        run: |
+          command -v 7z >/dev/null || brew install p7zip
+          source build/game/work/game.env
+          NAME="StS2-ios-${GAME_VERSION}-run${GITHUB_RUN_NUMBER}"
+          mkdir -p upload
+          7z a -tzip -mem=AES256 -p"$IPA_PASSWORD" "upload/$NAME.zip" ./build/game/StS2.ipa > /dev/null
+          rm -f build/game/StS2.ipa
+          echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "### StS2.ipa built for game ${GAME_VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Copy SlayTheSpire2.pck from your Steam install (${PCK_SIZE} bytes) into the app's folder." >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Stage fake-game IPA
+        if: env.SOURCE == 'fake'
+        run: |
+          mkdir -p upload
+          cp build/game/StS2.ipa upload/StS2-fakegame.ipa
+          cp "$HOME/game/SlayTheSpire2.pck" upload/
+          echo "ARTIFACT_NAME=StS2-fakegame-run${GITHUB_RUN_NUMBER}" >> "$GITHUB_ENV"
+
+      - name: Upload
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.ARTIFACT_NAME }}
+          path: upload/
+          if-no-files-found: error
+          retention-days: 3
+
+      - name: Upload build logs
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: StS2-build-logs-run${{ github.run_number }}
+          path: build/game/logs
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Remove game files
+        if: always()
+        run: rm -rf "$HOME/game" build upload

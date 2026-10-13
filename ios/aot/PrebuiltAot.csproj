@@ -1,0 +1,70 @@
+<Project Sdk="Godot.NET.Sdk/4.5.1">
+  <!--
+    NativeAOT-compiles an assembly that was built elsewhere (the game's
+    sts2.dll, after ios/tools/IlPatcher) without its source. Nothing is
+    compiled here: right after CoreCompile the prebuilt DLL overwrites this
+    project's own output, and ILC compiles it as the main assembly. The Godot
+    source generators already put the `godotsharp_game_main_init` entry point
+    into the game assembly, and NativeAOT exports it from the resulting library.
+
+    Every other DLL in PrebuiltDir (game dependencies, Sts2IosSupport) becomes
+    a reference. GodotSharp comes from the SDK package.
+
+    Copy or rename this file to <AssemblyName>.csproj (sts2.csproj) so
+    TargetName matches the assembly name Godot looks up at runtime.
+
+      dotnet publish sts2.csproj -c ExportRelease -r ios-arm64 -p:PrebuiltDir=<dir>
+
+    Verified on linux-x64: the stock 4.5.1 mono release template boots the
+    output; see ios/scripts/rehearse-linux.sh.
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+    <EnableDefaultCompileItems>false</EnableDefaultCompileItems>
+    <PrebuiltDir Condition=" '$(PrebuiltDir)' == '' ">$(MSBuildProjectDirectory)/prebuilt</PrebuiltDir>
+    <PrebuiltAssembly>$(PrebuiltDir)/$(AssemblyName).dll</PrebuiltAssembly>
+    <!-- The game reads JSON with the reflection serializer; keep it enabled
+         (Sts2IosSupport adds source-generated metadata where AOT needs it). -->
+    <JsonSerializerIsReflectionEnabledByDefault>true</JsonSerializerIsReflectionEnabledByDefault>
+    <!-- Sts2IosSupport references sts2, so MSBuild finds prebuilt/sts2.dll as
+         a dependency and the .deps.json gets this project's name twice.
+         NativeAOT doesn't use .deps.json. -->
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <!-- The game was never written for trimming/AOT, so its analysis warnings
+         aren't actionable (runtime testing is), and they would list game
+         members by the thousand in the public CI log. -->
+    <TrimmerSingleWarn>true</TrimmerSingleWarn>
+    <SuppressTrimAnalysisWarnings>true</SuppressTrimAnalysisWarnings>
+    <SuppressAotAnalysisWarnings>true</SuppressAotAnalysisWarnings>
+  </PropertyGroup>
+
+  <!-- iOS gets these from Godot.NET.Sdk (iOSNativeAOT.props/targets).
+       Set them for other RIDs so the pipeline can be smoke-tested on Linux. -->
+  <PropertyGroup Condition=" '$(GodotTargetPlatform)' != 'ios' ">
+    <PublishAot>true</PublishAot>
+  </PropertyGroup>
+  <ItemGroup Condition=" '$(GodotTargetPlatform)' != 'ios' ">
+    <TrimmerRootAssembly Include="GodotSharp" />
+    <TrimmerRootAssembly Include="$(TargetName)" />
+  </ItemGroup>
+  <ItemGroup>
+    <TrimmerRootAssembly Include="Sts2IosSupport" Condition="Exists('$(PrebuiltDir)/Sts2IosSupport.dll')" />
+  </ItemGroup>
+
+  <Target Name="AddPrebuiltReferences" BeforeTargets="ResolveAssemblyReferences">
+    <ItemGroup>
+      <_PrebuiltDll Include="$(PrebuiltDir)/*.dll" />
+      <Reference Include="%(_PrebuiltDll.Filename)"
+                 Condition=" '%(_PrebuiltDll.Filename)' != '$(AssemblyName)' and '%(_PrebuiltDll.Filename)' != 'GodotSharp' ">
+        <HintPath>%(_PrebuiltDll.FullPath)</HintPath>
+      </Reference>
+    </ItemGroup>
+  </Target>
+
+  <Target Name="UsePrebuiltAssembly" AfterTargets="CoreCompile">
+    <Error Condition="!Exists('$(PrebuiltAssembly)')" Text="Prebuilt assembly not found: $(PrebuiltAssembly)" />
+    <Copy SourceFiles="$(PrebuiltAssembly)" DestinationFiles="@(IntermediateAssembly)" />
+    <Message Importance="high" Text="NativeAOT input: $(PrebuiltAssembly)" />
+  </Target>
+</Project>

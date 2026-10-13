@@ -4,11 +4,13 @@
 
 An Android launcher + mod manager for **Slay the Spire 2**, built on a custom Godot 4.5.1 engine with .NET/Mono and Harmony runtime patching. Log in with Steam, download the game, browse the Steam Workshop, and play with mods — all on your phone.
 
+**New in this fork: an experimental iOS port** for iPhone and iPad. It's built in the cloud on GitHub's macOS runners, so no Mac is needed, and sideloaded from Windows with a free Apple ID. See [iPhone / iPad (experimental)](#iphone--ipad-experimental).
+
 **Current release: [v0.4.1](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest)**
 
 > **📖 사용설명서 (한국어)** — 설치부터 모드/세이브 관리까지 스크린샷과 함께 설명하는 단계별 가이드: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**
 
-> **Fork notice** — This is a community fork of [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher). The upstream launcher's mod loader stopped working with newer game builds; this fork keeps mod loading compatible with each game update and adds Workshop support, save-data safety features, and mobile-UX improvements. See [Differences from upstream](#differences-from-upstream).
+> **Fork notice** — This repository forks [iunius612/StS2-Launcher_Mod_Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager) to add the iOS port (`ios/`). The Android launcher is unchanged; its releases and issues live upstream. That project is itself a community fork of [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher). The upstream launcher's mod loader stopped working with newer game builds; this fork keeps mod loading compatible with each game update and adds Workshop support, save-data safety features, and mobile-UX improvements. See [Differences from upstream](#differences-from-upstream).
 
 > **Disclaimer** — Unofficial community project. Slay the Spire 2 is developed and published by Mega Crit Games. A valid Steam account that owns Slay the Spire 2 is required; game files are downloaded directly from Steam after authentication. No game assets are included in this repository.
 
@@ -19,6 +21,26 @@ An Android launcher + mod manager for **Slay the Spire 2**, built on a custom Go
 3. Pick a Steam branch and download the game (~3 GB), then tap **PLAY**.
 
 Full walkthrough with screenshots: [사용설명서 (USER_GUIDE.md)](docs/USER_GUIDE.md). Upgrading between fork versions is a drop-in APK install — saves, login, and the game payload are preserved.
+
+## iPhone / iPad (experimental)
+
+Runs your own Steam copy of the game natively on iOS. **Status:** the build pipeline works end to end on a stand-in game, both on Linux and in macOS CI, but hasn't run the real game on a device yet. Expect early fixes.
+
+The Android launcher can't be reused as-is on iOS, because iOS forbids the JIT compiler that Harmony and runtime DLL loading need. So the iOS port works differently:
+
+- **Ahead-of-time compiled.** A GitHub macOS runner logs into Steam with your account (you approve the sign-in in the Steam mobile app). It downloads the game's assemblies, applies the platform patches to `sts2.dll` at build time with Mono.Cecil, and compiles everything to native ARM64 code with .NET NativeAOT. This is also the fastest way to run the game's code on iOS.
+- **Your game data, not ours.** The app doesn't contain `SlayTheSpire2.pck`. You copy it from your PC's Steam folder into the app's folder, and the app checks that it matches the build.
+- **Private build output.** This repo is public and the app contains compiled game code, so the build is only uploaded inside a zip encrypted with a password you set.
+- **No mods** on iOS, and no Steam online features.
+
+Quick start:
+
+1. Sideload the probe app from **Actions → "iOS probe (phase 0)"** to check that sideloading works on your device. Its report shows whether the GPU reads the PC game's textures natively.
+2. Add the `STEAM_USERNAME`, `STEAM_PASSWORD`, and `IPA_PASSWORD` repository secrets.
+3. Run **Actions → "iOS game build"** with source `steam` and approve the Steam sign-in on your phone.
+4. Unzip the artifact with 7-Zip, sideload `StS2.ipa` with Sideloadly, copy `SlayTheSpire2.pck` into the app's folder, and play.
+
+Full guide, troubleshooting, and how the build works: **[ios/README.md](ios/README.md)**.
 
 ## Differences from upstream
 
@@ -124,6 +146,16 @@ android/                   # Godot Android gradle project
 tools/memberref-audit/     # Static IL audit of patches vs. a new game build
 scripts/                   # Build and tooling scripts
 docs/                      # User guide (Korean) + images
+ios/                       # iOS port (see ios/README.md)
+  probe/                   # Phase 0 probe app (device + toolchain check)
+  game/                    # Stub Godot project that drives the iOS export
+  aot/                     # NativeAOT of the prebuilt sts2.dll
+  support/                 # Managed hooks compiled into the iOS build
+  boot/                    # ios_boot GDExtension: mounts the game pck at startup
+  tools/                   # IL patcher, .pck / project.binary tools
+  scripts/                 # Build scripts (CI) + Linux rehearsal
+  test/                    # Stand-in game for pipeline tests
+.github/workflows/         # iOS probe + iOS game builds (GitHub macOS runners)
 ```
 
 ### Prerequisites

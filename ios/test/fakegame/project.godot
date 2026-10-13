@@ -1,0 +1,16 @@
+; Fake "Slay the Spire 2" for pipeline tests (see ../README.md).
+config_version=5
+
+[application]
+
+config/name="Slay the Spire 2"
+run/main_scene="res://scenes/game.tscn"
+config/features=PackedStringArray("4.5", "C#")
+
+[autoload]
+
+SentryInit="*res://addons/sentry/SentryInit.gd"
+
+[dotnet]
+
+project/assembly_name="sts2"

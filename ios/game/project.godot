@@ -1,0 +1,35 @@
+; Stub project that drives Godot's iOS export for the real game: it supplies
+; the Xcode project, engine, NativeAOT build of sts2.dll (sts2.csproj is
+; generated from ios/aot/PrebuiltAot.csproj), and the iOS GDExtensions.
+; Its own settings only shape the Xcode project and Info.plist. At runtime the
+; app boots with the game's project.binary (see ios/tools/make_bootstrap.py).
+
+config_version=5
+
+[application]
+
+config/name="StS2"
+config/features=PackedStringArray("4.5", "C#")
+config/icon="res://icon.svg"
+
+[display]
+
+window/handheld/orientation=4
+window/ios/hide_home_indicator=true
+window/ios/hide_status_bar=true
+window/ios/suppress_ui_gesture=true
+
+[dotnet]
+
+project/assembly_name="sts2"
+
+[editor_plugins]
+
+; FMOD's editor plugin registers its export plugin, which writes
+; load_all_fmod_plugins into the Xcode project (dummy.cpp). The iOS FMOD
+; library is linked at launch and needs that symbol in the main executable.
+enabled=PackedStringArray("res://addons/fmod/plugin.cfg")
+
+[rendering]
+
+textures/vram_compression/import_etc2_astc=true
