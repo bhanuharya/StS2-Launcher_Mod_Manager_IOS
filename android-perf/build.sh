@@ -3,8 +3,9 @@
 #
 #   1. STS2Perf.dll, the add-on (Sts2Perf/), compiled against the launcher
 #      DLLs inside the upstream APK. No game files or Steam login needed.
-#   2. STS2Mobile.dll patched to load it and to check this fork's releases
-#      for launcher updates (tools/LauncherPatcher).
+#   2. STS2Mobile.dll patched to load it, to check this fork's releases for
+#      launcher updates, and with its Korean-only text in English
+#      (translations.json) (tools/LauncherPatcher).
 #   3. AndroidManifest.xml with its own package id, name and version, so it
 #      installs next to the upstream app (tools/axml.py).
 #   4. Repacked, zipaligned and signed with your key.
@@ -90,6 +91,7 @@ dotnet "$WORK/patcher/LauncherPatcher.dll" "$REFS/STS2Mobile.dll" "$WORK/patched
              "https://github.com/$UPDATE_REPO/releases/latest" \
     --string "/data/user/0/$UPSTREAM_PACKAGE/cache/MonoMod" \
              "/data/user/0/$PERF_PACKAGE/cache/MonoMod" \
+    --translations "$HERE/translations.json" \
     --addon STS2Perf.dll STS2Perf.PerfEntry \
     --addon-dir "/data/user/0/$PERF_PACKAGE/files/.godot/mono/publish/arm64"
 

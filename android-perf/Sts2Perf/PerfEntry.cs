@@ -31,6 +31,7 @@ public static class PerfEntry
         Run("update check", () => UpdateRedirect.Apply(harmony));
         Run("graphics toggle", () => GraphicsToggle.Apply(harmony));
         Run("render mode", () => RenderMode.Apply(harmony));
+        Run("english text", () => EnglishText.Apply(harmony));
     }
 
     internal static void Log(string msg) => PatchHelper.Log($"[Perf] {msg}");

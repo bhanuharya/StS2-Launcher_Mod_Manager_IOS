@@ -3,7 +3,10 @@
 //   1. --string OLD NEW: replaces string literals (ldstr) that equal OLD.
 //      Every OLD must be found at least once, so an upstream change can't
 //      silently skip a replacement.
-//   2. --addon FILE TYPE [--addon-dir DIR]: adds ModEntry.LoadPerfAddon(),
+//   2. --translations FILE: replaces string literals using a JSON object
+//      {"original": "replacement"}, matched exactly (used to translate the
+//      launcher's Korean-only UI text). Lists any Hangul literal left over.
+//   3. --addon FILE TYPE [--addon-dir DIR]: adds ModEntry.LoadPerfAddon(),
 //      which loads DIR/FILE and calls TYPE.Apply(). DIR is where the app
 //      unpacks assets/dotnet_bcl. If DIR/FILE doesn't exist it tries next to
 //      STS2Mobile.dll, but on Android Assembly.Location isn't the real folder,
@@ -13,21 +16,40 @@
 //      Any failure is caught and logged, so a broken add-on leaves the
 //      launcher exactly as upstream ships it.
 //
-// Usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--addon FILE TYPE] [--addon-dir DIR]
+// Usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--translations FILE]
+//                        [--addon FILE TYPE] [--addon-dir DIR]
+//        LauncherPatcher --list-strings <dll>
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--addon FILE TYPE] [--addon-dir DIR]");
+    Console.Error.WriteLine("usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--translations FILE] [--addon FILE TYPE] [--addon-dir DIR]");
     return 2;
+}
+
+// --list-strings: print every string literal that contains Hangul, with the
+// method it's in, as JSON lines. Used to keep translations.json complete.
+if (args[0] == "--list-strings" && args.Length == 2)
+{
+    var listResolver = new DefaultAssemblyResolver();
+    using var listed = AssemblyDefinition.ReadAssembly(args[1], new ReaderParameters { AssemblyResolver = listResolver });
+    foreach (var type in AllTypes(listed.MainModule))
+    foreach (var method in type.Methods.Where(m => m.HasBody))
+    foreach (var ins in method.Body.Instructions)
+    {
+        if (ins.OpCode == OpCodes.Ldstr && ins.Operand is string str && str.Any(IsHangul))
+            Console.WriteLine(System.Text.Json.JsonSerializer.Serialize(new { method = $"{type.FullName}::{method.Name}", text = str }));
+    }
+    return 0;
 }
 
 var input = args[0];
 var output = args[1];
 var replacements = new List<(string Old, string New)>();
 string? addonFile = null, addonType = null, addonDir = null;
+var translations = new Dictionary<string, string>();
 for (int i = 2; i < args.Length; i++)
 {
     switch (args[i])
@@ -40,6 +62,11 @@ for (int i = 2; i < args.Length; i++)
             addonFile = args[i + 1];
             addonType = args[i + 2];
             i += 2;
+            break;
+        case "--translations" when i + 1 < args.Length:
+            foreach (var (k, v) in System.Text.Json.JsonSerializer.Deserialize<Dictionary<string, string>>(File.ReadAllText(args[i + 1]))!)
+                translations[k] = v;
+            i += 1;
             break;
         case "--addon-dir" when i + 1 < args.Length:
             addonDir = args[i + 1];
@@ -84,6 +111,31 @@ foreach (var (oldValue, newValue) in replacements)
     }
 }
 
+if (translations.Count > 0)
+{
+    int translated = 0;
+    var untranslated = new SortedSet<string>(StringComparer.Ordinal);
+    foreach (var type in AllTypes(module))
+    foreach (var method in type.Methods.Where(m => m.HasBody))
+    foreach (var ins in method.Body.Instructions)
+    {
+        if (ins.OpCode != OpCodes.Ldstr || ins.Operand is not string str)
+            continue;
+        if (translations.TryGetValue(str, out var replacement))
+        {
+            ins.Operand = replacement;
+            translated++;
+        }
+        else if (str.Any(IsHangul))
+        {
+            untranslated.Add(str);
+        }
+    }
+    Console.WriteLine($"  translated {translated} string literals");
+    foreach (var str in untranslated)
+        Console.WriteLine($"  WARNING: untranslated: {System.Text.Json.JsonSerializer.Serialize(str)}");
+}
+
 if (addonFile != null && addonType != null)
 {
     if (!InjectAddonLoader(module, addonFile, addonType, addonDir ?? ""))
@@ -96,6 +148,8 @@ if (failures > 0)
 asm.Write(output);
 Console.WriteLine($"Wrote {output}");
 return 0;
+
+static bool IsHangul(char c) => c >= '\uAC00' && c <= '\uD7A3' || c >= '\u3130' && c <= '\u318F';
 
 static IEnumerable<TypeDefinition> AllTypes(ModuleDefinition module)
 {

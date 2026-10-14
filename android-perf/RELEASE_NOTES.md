@@ -11,6 +11,7 @@ It installs **next to** the original app (package `{{PACKAGE}}`, app name "StS2 
 - **Graphics: Fast** (default): the game renders at its layout resolution (about 1080p) and is scaled up to the screen. On a 2560×1600 tablet that's 1728×1080, under half the pixels. Fast also turns off HDR 2D, FXAA and debanding if the game uses them. On a 1080p phone at 100% UI scale, the resolution doesn't change.
 - **Graphics: Sharp**: full resolution, exactly like upstream.
 - The switch is on the launcher's main screen, next to **Debug**. It takes effect when the game starts.
+- The launcher's Korean-only dialogs (Save Manager, backups, cloud sync, Mod Hub messages) are in English.
 - **CHECK LAUNCHER UPDATE** looks for new versions on this fork's Releases page.
 
 Everything else (Steam login, downloads, Workshop, saves, cloud sync, LAN) is upstream's code, unchanged.

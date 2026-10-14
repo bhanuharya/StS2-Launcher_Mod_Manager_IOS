@@ -14,6 +14,7 @@ Download it from this repo's **Releases** page (`StS2LauncherPerf-v….apk`).
 | Render resolution | Full screen resolution | **Graphics: Fast** (default): the game's layout resolution, about 1080p, scaled up to the screen |
 | Full-screen effects | As the game sets them | Fast turns off HDR 2D, FXAA and debanding if the game uses them |
 | App | `com.game.sts2launcher.modmanager`, "StS2 Launcher Mod" | `com.game.sts2launcher.modmanager.perf`, "StS2 Launcher Perf": installs **next to** the original |
+| Launcher text | Many dialogs only in Korean (Save Manager, backups, cloud sync, Mod Hub messages) | English everywhere |
 | Launcher updates | Upstream releases | This fork's releases |
 
 Everything else is upstream's code, unchanged: Steam login, downloads,
@@ -119,7 +120,8 @@ upstream release APK (perf.env pins the version and its SHA-256)
   │                            launcher DLLs inside that APK (GodotSharp, Harmony,
   │                            STS2Mobile)
   ├─ tools/LauncherPatcher     STS2Mobile.dll: loads STS2Perf.dll at startup,
-  │                            update check → this fork, MonoMod temp dir → new package
+  │                            update check → this fork, MonoMod temp dir → new package,
+  │                            Korean text → English (translations.json)
   ├─ tools/axml.py             AndroidManifest.xml: package id, provider authorities,
   │                            app name, version
   └─ tools/repack.py           new APK; then zipalign + apksigner
@@ -138,6 +140,17 @@ hooks the game:
   `viewport` stretch mode in Fast. This keeps the same layout and touch mapping
   but renders at the layout size.
 - `AppUpdateChecker.GetInstalledVersion` → reports the perf version.
+- `SaveProgressSummary.FormatCurrentRun` → "Act 2, Floor 7" (word order the
+  translation table can't change).
+
+**Translations.** `translations.json` maps each Korean string literal in the
+upstream `STS2Mobile.dll` to English, matched exactly. Interpolated strings
+are split into pieces at their `{…}` holes, so each piece is translated on its
+own. After moving to a new upstream release, the build prints
+`WARNING: untranslated: …` for any new Korean text; add it to the table.
+`LauncherPatcher --list-strings STS2Mobile.dll` lists them all. The texture
+cache rebuild screen shown after a game update is drawn by the Java side
+and stays in Korean.
 
 If the add-on fails to load, the launcher logs `[STS2Perf] ... failed to load`
 and runs exactly like upstream.
