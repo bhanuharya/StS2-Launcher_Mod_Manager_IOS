@@ -82,6 +82,7 @@ dotnet build "$HERE/Sts2Perf/Sts2Perf.csproj" -c Release -nologo -v q \
 
 log "Patching STS2Mobile.dll"
 dotnet build "$HERE/tools/LauncherPatcher/LauncherPatcher.csproj" -c Release -nologo -v q -o "$WORK/patcher"
+# GodotApp.setupAssemblies() copies assets/dotnet_bcl to <files dir>/.godot/mono/publish/arm64.
 dotnet "$WORK/patcher/LauncherPatcher.dll" "$REFS/STS2Mobile.dll" "$WORK/patched/STS2Mobile.dll" \
     --string "https://api.github.com/repos/$UPSTREAM_REPO/releases/latest" \
              "https://api.github.com/repos/$UPDATE_REPO/releases/latest" \
@@ -89,7 +90,8 @@ dotnet "$WORK/patcher/LauncherPatcher.dll" "$REFS/STS2Mobile.dll" "$WORK/patched
              "https://github.com/$UPDATE_REPO/releases/latest" \
     --string "/data/user/0/$UPSTREAM_PACKAGE/cache/MonoMod" \
              "/data/user/0/$PERF_PACKAGE/cache/MonoMod" \
-    --addon STS2Perf.dll STS2Perf.PerfEntry
+    --addon STS2Perf.dll STS2Perf.PerfEntry \
+    --addon-dir "/data/user/0/$PERF_PACKAGE/files/.godot/mono/publish/arm64"
 
 log "Editing AndroidManifest.xml"
 python3 "$HERE/tools/axml.py" edit "$WORK/base/AndroidManifest.xml" "$WORK/patched/AndroidManifest.xml" \

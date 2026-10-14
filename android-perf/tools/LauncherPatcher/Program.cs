@@ -3,28 +3,31 @@
 //   1. --string OLD NEW: replaces string literals (ldstr) that equal OLD.
 //      Every OLD must be found at least once, so an upstream change can't
 //      silently skip a replacement.
-//   2. --addon FILE TYPE: adds ModEntry.LoadPerfAddon(), which loads FILE from
-//      the directory STS2Mobile.dll was loaded from and calls TYPE.Apply().
+//   2. --addon FILE TYPE [--addon-dir DIR]: adds ModEntry.LoadPerfAddon(),
+//      which loads DIR/FILE and calls TYPE.Apply(). DIR is where the app
+//      unpacks assets/dotnet_bcl. If DIR/FILE doesn't exist it tries next to
+//      STS2Mobile.dll, but on Android Assembly.Location isn't the real folder,
+//      so the build passes DIR.
 //      It runs inside ModEntry.Apply right after the Harmony instance is
 //      created (after the TMPDIR fix MonoMod needs, before the first patch).
 //      Any failure is caught and logged, so a broken add-on leaves the
 //      launcher exactly as upstream ships it.
 //
-// Usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--addon FILE TYPE]
+// Usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--addon FILE TYPE] [--addon-dir DIR]
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 
 if (args.Length < 2)
 {
-    Console.Error.WriteLine("usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--addon FILE TYPE]");
+    Console.Error.WriteLine("usage: LauncherPatcher <in.dll> <out.dll> [--string OLD NEW]... [--addon FILE TYPE] [--addon-dir DIR]");
     return 2;
 }
 
 var input = args[0];
 var output = args[1];
 var replacements = new List<(string Old, string New)>();
-string? addonFile = null, addonType = null;
+string? addonFile = null, addonType = null, addonDir = null;
 for (int i = 2; i < args.Length; i++)
 {
     switch (args[i])
@@ -37,6 +40,10 @@ for (int i = 2; i < args.Length; i++)
             addonFile = args[i + 1];
             addonType = args[i + 2];
             i += 2;
+            break;
+        case "--addon-dir" when i + 1 < args.Length:
+            addonDir = args[i + 1];
+            i += 1;
             break;
         default:
             Console.Error.WriteLine($"unknown or incomplete option: {args[i]}");
@@ -79,7 +86,7 @@ foreach (var (oldValue, newValue) in replacements)
 
 if (addonFile != null && addonType != null)
 {
-    if (!InjectAddonLoader(module, addonFile, addonType))
+    if (!InjectAddonLoader(module, addonFile, addonType, addonDir ?? ""))
         failures++;
 }
 
@@ -110,7 +117,7 @@ static IEnumerable<TypeDefinition> AllTypes(ModuleDefinition module)
     }
 }
 
-static bool InjectAddonLoader(ModuleDefinition module, string addonFile, string addonType)
+static bool InjectAddonLoader(ModuleDefinition module, string addonFile, string addonType, string addonDir)
 {
     var modEntry = module.GetType("STS2Mobile.ModEntry");
     var apply = modEntry?.Methods.FirstOrDefault(m => m.Name == "Apply" && m.IsStatic);
@@ -160,6 +167,11 @@ static bool InjectAddonLoader(ModuleDefinition module, string addonFile, string 
     var textWriterT = T("System.IO", "TextWriter", runtime);
     var consoleT = T("System", "Console", console);
     var handleT = T("System", "RuntimeTypeHandle", runtime, valueType: true);
+    var fileT = T(
+        "System.IO",
+        "File",
+        module.GetTypeReferences().FirstOrDefault(t => t.FullName == "System.IO.File")?.Scope ?? runtime
+    );
 
     var loader = new MethodDefinition(
         "LoadPerfAddon",
@@ -170,19 +182,44 @@ static bool InjectAddonLoader(ModuleDefinition module, string addonFile, string 
         NoInlining = true,
     };
     var exVar = new VariableDefinition(exceptionT);
+    var pathVar = new VariableDefinition(ts.String);
     loader.Body.Variables.Add(exVar);
+    loader.Body.Variables.Add(pathVar);
     loader.Body.InitLocals = true;
     var il = loader.Body.GetILProcessor();
     var end = il.Create(OpCodes.Ret);
 
-    var tryStart = il.Create(OpCodes.Ldtoken, modEntry);
+    var combine = M(pathT, "Combine", ts.String, false, ts.String, ts.String);
+    var writeLine = M(textWriterT, "WriteLine", ts.Void, true, ts.String);
+    var concat = M(ts.String, "Concat", ts.String, false, ts.String, ts.String);
+    var load = il.Create(OpCodes.Call, M(consoleT, "get_Error", textWriterT, false));
+
+    // path = Path.Combine(DIR, FILE); if (!File.Exists(path))
+    //     path = Path.Combine(Path.GetDirectoryName(typeof(ModEntry).Assembly.Location), FILE);
+    var tryStart = il.Create(OpCodes.Ldstr, addonDir);
     il.Append(tryStart);
+    il.Emit(OpCodes.Ldstr, addonFile);
+    il.Emit(OpCodes.Call, combine);
+    il.Emit(OpCodes.Stloc, pathVar);
+    il.Emit(OpCodes.Ldloc, pathVar);
+    il.Emit(OpCodes.Call, M(fileT, "Exists", ts.Boolean, false, ts.String));
+    il.Emit(OpCodes.Brtrue, load);
+    il.Emit(OpCodes.Ldtoken, modEntry);
     il.Emit(OpCodes.Call, M(typeT, "GetTypeFromHandle", typeT, false, handleT));
     il.Emit(OpCodes.Callvirt, M(typeT, "get_Assembly", assemblyT, true));
     il.Emit(OpCodes.Callvirt, M(assemblyT, "get_Location", ts.String, true));
     il.Emit(OpCodes.Call, M(pathT, "GetDirectoryName", ts.String, false, ts.String));
     il.Emit(OpCodes.Ldstr, addonFile);
-    il.Emit(OpCodes.Call, M(pathT, "Combine", ts.String, false, ts.String, ts.String));
+    il.Emit(OpCodes.Call, combine);
+    il.Emit(OpCodes.Stloc, pathVar);
+
+    // Console.Error.WriteLine("[STS2Perf] loading " + path); Assembly.LoadFrom(path)...
+    il.Append(load);
+    il.Emit(OpCodes.Ldstr, "[STS2Perf] loading ");
+    il.Emit(OpCodes.Ldloc, pathVar);
+    il.Emit(OpCodes.Call, concat);
+    il.Emit(OpCodes.Callvirt, writeLine);
+    il.Emit(OpCodes.Ldloc, pathVar);
     il.Emit(OpCodes.Call, M(assemblyT, "LoadFrom", assemblyT, false, ts.String));
     il.Emit(OpCodes.Ldstr, addonType);
     il.Emit(OpCodes.Ldc_I4_1); // throwOnError
@@ -201,8 +238,8 @@ static bool InjectAddonLoader(ModuleDefinition module, string addonFile, string 
     il.Emit(OpCodes.Ldstr, $"[STS2Perf] {addonFile} failed to load: ");
     il.Emit(OpCodes.Ldloc, exVar);
     il.Emit(OpCodes.Callvirt, M(ts.Object, "ToString", ts.String, true));
-    il.Emit(OpCodes.Call, M(ts.String, "Concat", ts.String, false, ts.String, ts.String));
-    il.Emit(OpCodes.Callvirt, M(textWriterT, "WriteLine", ts.Void, true, ts.String));
+    il.Emit(OpCodes.Call, concat);
+    il.Emit(OpCodes.Callvirt, writeLine);
     il.Emit(OpCodes.Leave, end);
     il.Append(end);
 
@@ -234,6 +271,6 @@ static bool InjectAddonLoader(ModuleDefinition module, string addonFile, string 
             return false;
         }
     }
-    Console.WriteLine($"  injected ModEntry.LoadPerfAddon() -> {addonFile} {addonType}.Apply()");
+    Console.WriteLine($"  injected ModEntry.LoadPerfAddon() -> {Path.Combine(addonDir, addonFile)} {addonType}.Apply()");
     return true;
 }
