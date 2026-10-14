@@ -93,15 +93,16 @@ send these instead:
 2. About a minute later, GitHub notifies you of a new issue, **"Steam Guard
    code for iOS build #N"**, that mentions you. Open the **Steam app →
    Steam Guard** (shield icon) and reply to the issue with the 5-character
-   code. Send it right after the code changes; codes last 30 seconds. If your
-   Steam Guard uses e-mail instead, reply with the code from the e-mail. The
+   code. Send it right after the code changes; codes last 30 seconds. The
    build reads only your replies, deletes each one after reading it, and
    closes the issue once it's signed in. It waits 15 minutes for a code.
 
-   The Steam app also pops up sign-in requests from the build machine.
-   **Close them without tapping Approve or Deny.** GitHub's build machines
-   are in the US/UK, and Steam blocks approving a sign-in from that far away
-   ("Steam has blocked this sign in"). A typed code isn't blocked.
+   After you reply, the Steam app may pop up a sign-in request from the
+   build machine. **Don't approve it.** GitHub's build machines are in the
+   US/UK, and Steam blocks approving a sign-in from that far away ("Steam
+   has blocked this sign in"). Your code already signs the build in. No
+   Steam Guard in the Steam app? Reply `email`, and then reply with the code
+   Steam e-mails you.
 3. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
    (kept for 3 days).
 

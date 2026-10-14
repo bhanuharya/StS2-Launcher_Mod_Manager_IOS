@@ -172,17 +172,22 @@ static class SteamFetchProgram
 
     // Steam closes a connection that hasn't signed in within about a minute,
     // longer than it takes someone to read the Steam app and send the code.
-    // So for app codes: start a session to learn what Steam wants, wait for
-    // the code with no connection open, then sign in again and send it at
-    // once. E-mail codes are only sent when a session starts, so those are
-    // waited for on that session.
+    // And once a sign-in starts, the Steam app shows an Approve/Deny prompt
+    // over the code. So for app codes: get the code first, with no sign-in
+    // under way, then connect and send it within seconds. A rejected code
+    // repeats that. E-mail codes are only sent once a sign-in starts, so
+    // with the answer "email" it starts one and waits for that code on it.
     private static async Task<(SteamSession, string, string)> SignInWithCodeAsync(
         string user, string password, Func<string, bool, Task<string>> getCode)
     {
-        string? code = null;
+        string? code = await getCode("device", false);
+        // "email": no authenticator app; start a sign-in so Steam e-mails a code.
+        if (string.Equals(code, "email", StringComparison.OrdinalIgnoreCase))
+            code = null;
         var codeWasRejected = false;
         for (var attempt = 1; attempt <= 6; attempt++)
         {
+            Console.WriteLine("Signing in with the code...");
             var session = await SteamSession.ConnectAsync();
             var needCode = false;
             var authenticator = new CodeAuthenticator(async (kind, previousWasIncorrect) =>
@@ -224,7 +229,6 @@ static class SteamFetchProgram
                 throw;
             }
             code = await getCode("device", codeWasRejected);
-            Console.WriteLine("Signing in with the code...");
         }
         throw new InvalidOperationException("Steam didn't accept a code after several tries");
     }

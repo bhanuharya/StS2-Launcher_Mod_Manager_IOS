@@ -82,9 +82,14 @@ def open_issue(kind, user):
         f"needs a Steam Guard code to sign in to Steam.\n\n"
         f"**Reply to this issue with {where}.** "
         "App codes change every 30 seconds, so send it right after it changes.\n\n"
-        "The Steam app will also show sign-in requests from the build machine. "
-        "**Close them without tapping Approve or Deny**: Steam blocks approving from that far away, "
-        "and the code is what signs the build in.\n\n"
+        + (
+            ""
+            if kind.startswith("email:")
+            else "No Steam Guard in the Steam app? Reply `email` and Steam will e-mail you a code to send here.\n\n"
+        )
+        +
+        "After you reply, the Steam app may show a sign-in request from the build machine. "
+        "**Don't approve it**: Steam blocks approving from that far away, and your code already signs the build in.\n\n"
         "Only your replies are read, and each one is deleted after it's read. "
         "This issue closes when the build is signed in. "
         f"The build waits {WAIT_SECONDS // 60} minutes for a code."
@@ -113,6 +118,9 @@ def request_code(kind, attempt):
     elif attempt == "retry":
         call("POST", f"/issues/{state['issue']}/comments",
              {"body": f"@{user} Steam rejected that code (wrong or expired). Reply with the current one."})
+    elif kind.startswith("email:"):
+        call("POST", f"/issues/{state['issue']}/comments",
+             {"body": f"@{user} Steam just e-mailed a code to {kind[6:]}. Reply with it."})
     log(f"::notice::Reply to {state['url']} with your Steam Guard code. Waiting up to {WAIT_SECONDS // 60} minutes.")
 
     deadline = time.time() + WAIT_SECONDS
