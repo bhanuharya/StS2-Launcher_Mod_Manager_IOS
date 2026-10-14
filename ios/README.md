@@ -58,19 +58,43 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 
 1. **Enable Actions on this fork.** Open the **Actions** tab. If GitHub asks,
    click *"I understand my workflows, go ahead and enable them"*.
-2. **Add three repository secrets** under **Settings → Secrets and variables →
+2. **Save a Steam login on your PC.** Steam won't let you approve a sign-in
+   from GitHub's build machines (they're in another country), so you sign in
+   once on your own PC and give the build the saved login instead of your
+   password:
+   1. Open **Actions → "SteamFetch"**, select the latest green run, and
+      download **SteamFetch-win-x64** (or **SteamFetch-linux-x64** for WSL or
+      Linux). Unzip it.
+   2. In a terminal in that folder, run `.\SteamFetch.exe login` (Windows) or
+      `chmod +x SteamFetch && ./SteamFetch login` (Linux/WSL). If Windows
+      SmartScreen warns about it, click *More info → Run anyway*.
+   3. Type your account name and password, then approve the sign-in in the
+      Steam mobile app (or type the Steam Guard code it asks for).
+   4. It prints your account name and a long **refresh token**. That token
+      works like your password: put it only in the secret below.
+
+   Or, with the .NET 8 or 9 SDK installed:
+   `dotnet run --project ios/tools/SteamFetch -- login`.
+3. **Add three repository secrets** under **Settings → Secrets and variables →
    Actions → New repository secret**:
 
    | Name | Value |
    |---|---|
-   | `STEAM_USERNAME` | your Steam account name |
-   | `STEAM_PASSWORD` | your Steam password |
+   | `STEAM_USERNAME` | the account name SteamFetch printed |
+   | `STEAM_REFRESH_TOKEN` | the refresh token SteamFetch printed |
    | `IPA_PASSWORD` | a password you make up; you'll type it to unzip the app |
 
    Secrets are encrypted, are never shown in logs, and aren't given to pull
    requests from other people's forks. Only workflows you start can use them.
-3. **Steam Guard mobile authenticator.** You approve each build's sign-in in
-   the Steam mobile app. Email-code Steam Guard can't work in CI.
+   The token lasts for months. If a build says Steam rejected the login, run
+   `SteamFetch login` again and replace the secret. To revoke it, use **Steam
+   → Settings → Security → Manage Steam Guard → Remove all authorized
+   devices**, or change your password.
+
+   (Without `STEAM_REFRESH_TOKEN`, the build signs in with a
+   `STEAM_PASSWORD` secret and waits for you to approve it in the Steam
+   mobile app. That only works when Steam accepts sign-ins from the runner's
+   location.)
 4. **Install the game on your PC through Steam** (same branch you build
    for). You'll copy its `SlayTheSpire2.pck` to the phone.
 
@@ -79,9 +103,7 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 1. **Actions → "iOS game build" → Run workflow.** Pick branch
    `main`, source `steam`, and Steam branch `public`
    (or the beta you play).
-2. When the **Download game from Steam** step starts, open the Steam app on
-   your phone and **approve the sign-in**.
-3. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
+2. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
    (kept for 3 days).
 
 ### Install
@@ -143,7 +165,7 @@ suspend/resume handling.
 
 ```
 Steam (your account) ──► data_*/sts2.dll + deps, SlayTheSpire2.pck (CI only)
-        │
+        │                       tools/SteamFetch (saved login) or DepotDownloader
         ├─ tools/select_assemblies.py   game's own managed DLLs, no .NET runtime
         ├─ tools/IlPatcher              skip Steam/Sentry init, call Sts2Ios.Hooks
         ├─ support/Sts2IosSupport       Steam stub resolver, AOT-safe atlas JSON, diagnostics
