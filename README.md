@@ -211,6 +211,41 @@ When Steam updates the game, build again and copy the new `.pck`; the two
 have to match. Full guide, troubleshooting, and how the build works:
 **[ios/README.md](ios/README.md)**.
 
+### Future improvements
+
+Planned, roughly in this order. None of these are built yet.
+
+1. **Find and fix the short freezes.** The next build logs every slow frame
+   with its cause (graphics pipelines compiled, textures loaded, or .NET
+   garbage collection).
+2. **Steam login in the app, with Steam Cloud saves.** The Android launcher
+   talks to Steam through SteamKit2, a pure .NET library, so the same login
+   and the Save Manager (Keep Local / Keep Cloud) can be compiled into the iOS
+   build. Signing in from your own phone also avoids Steam blocking the build
+   machine's location. This replaces copying saves by hand. The first step is
+   checking that SteamKit2 works when compiled ahead of time.
+3. **Download `SlayTheSpire2.pck` in the app** from Steam, as the Android
+   launcher downloads the game, so the PC is no longer needed for game data.
+4. **Automatic builds on game updates.** With a saved Steam login
+   (`STEAM_REFRESH_TOKEN`), a daily workflow can check Steam for a new game
+   build and produce a new `StS2.ipa` without asking for a code. Updating then
+   means one Sideloadly install, which a free Apple ID needs every 7 days
+   anyway.
+5. **Phone-friendly UI.** Port the Android launcher's mobile fixes as
+   build-time patches: UI scale for phone screens, touch-friendly tooltips,
+   and suspend/resume handling.
+6. **Achievements**, probably possible through the same Steam connection.
+
+What iOS rules out:
+
+- **Game updates without reinstalling.** A game update changes the game's
+  code, and iOS doesn't let an app load new code, so every update is a new
+  build and a reinstall. Running new code would take a Godot build with a
+  .NET interpreter: a large engine project, and the game would run
+  noticeably slower.
+- **Mods**, for the same reason.
+- **Steam lobbies and P2P multiplayer**, and the Steam overlay.
+
 ## Development
 
 ### Android launcher

@@ -190,11 +190,35 @@ deleting the app.
   compiles, texture loads, or .NET garbage collection; a frame-time log
   like the Android perf build's would tell them apart.
 
-## Phase 2: playability
+## Future improvements
 
-Port the most important mobile fixes from the Android patches as IL patches:
-UI scale for phone screens, touch-friendly hover/tooltips, and app
-suspend/resume handling.
+Planned, roughly in this order; none are built yet.
+
+1. **Short freezes.** `support/FrameWatch.cs` logs each frame over 100 ms
+   with what changed during it (pipelines compiled per kind, texture memory,
+   resources, GC collections and pause). Fix whichever cause shows up.
+2. **Steam login and Steam Cloud saves in the app.** Port the Android
+   launcher's SteamKit2 login and Save Manager (`src/STS2Mobile/Steam`). On
+   Android they're hooked in at runtime with Harmony; here the hooks have to
+   be IL patches at build time, like the existing ones. First check that
+   SteamKit2 (protobuf serialization, reflection) works under NativeAOT, for
+   example with SteamFetch published with `PublishAot`. Logging in from the
+   phone also avoids Steam's location block on the build machine.
+3. **In-app `.pck` download** through the same SteamKit2 depot code the
+   Android launcher uses, so the PC isn't needed for game data.
+4. **Automatic builds on game updates.** A scheduled workflow uses
+   `STEAM_REFRESH_TOKEN` to compare the Steam build ID (PICS) with the last
+   build's, and builds a new IPA when it changes. Updating is then one
+   Sideloadly install.
+5. **Playability.** Port the most important mobile fixes from the Android
+   patches as IL patches: UI scale for phone screens, touch-friendly
+   hover/tooltips, and app suspend/resume handling.
+6. **Achievements** through SteamKit2's user stats, if worth it.
+
+Not possible on iOS: game updates or mods without a rebuild (no loading of
+new code; a Godot build with a .NET interpreter could do it, but it's a large
+engine project and much slower), Steam lobbies and P2P networking, and the
+Steam overlay.
 
 ## Known limits
 
@@ -203,7 +227,7 @@ suspend/resume handling.
   Saves are copied by hand (see [Saves](#saves)). Direct-IP / LAN
   multiplayer may work.
 - No mods (see above).
-- iPhone screen size: the PC UI is small on a 6.3" display until phase 2.
+- iPhone screen size: the PC UI is small on a 6.3" display (see [Future improvements](#future-improvements)).
 - Godot's iOS C# support is marked experimental upstream.
 
 ## How the build works (for developers)
