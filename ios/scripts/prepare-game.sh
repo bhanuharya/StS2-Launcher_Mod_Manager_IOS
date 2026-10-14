@@ -56,7 +56,10 @@ log "Patching sts2.dll"
 mkdir -p "$WORK/prebuilt"
 find "$WORK/assemblies" -maxdepth 1 -name '*.dll' ! -name 'sts2.dll' -exec cp {} "$WORK/prebuilt/" \;
 cp "$WORK/support/Sts2IosSupport.dll" "$WORK/prebuilt/"
-dotnet "$WORK/patcher/IlPatcher.dll" "$WORK/assemblies/sts2.dll" "$WORK/support/Sts2IosSupport.dll" "$WORK/prebuilt/sts2.dll"
+# The game's data folder lets the patcher resolve GodotSharp.dll and the .NET
+# assemblies sts2.dll's attributes refer to; nothing is copied from it.
+dotnet "$WORK/patcher/IlPatcher.dll" "$WORK/assemblies/sts2.dll" "$WORK/support/Sts2IosSupport.dll" \
+    "$WORK/prebuilt/sts2.dll" "$DATA_DIR"
 
 log "Extracting project settings from the game pck"
 python3 "$IOS/tools/pck.py" extract "$PCK" "$WORK/pck-meta" \
