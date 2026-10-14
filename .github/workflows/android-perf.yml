@@ -1,0 +1,125 @@
+name: Android perf build
+
+# Builds "StS2 Launcher Perf": upstream's release APK plus the performance
+# add-on in android-perf/, with its own package id, signed with your key.
+# See android-perf/README.md. Needs no game files and no Steam login.
+#
+# Publishing a release (needs the ANDROID_KEYSTORE_B64 and
+# ANDROID_KEYSTORE_PASSWORD secrets):
+#   - Actions > "Android perf build" > Run workflow (from main), or
+#   - push a tag v<version>, e.g. v0.4.2.1 (must match android-perf/perf.env).
+#
+# Pushes and pull requests that touch android-perf/ run a test build signed
+# with a throwaway key; nothing is published.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ["**"]
+    tags: ["v*"]
+    paths:
+      - "android-perf/**"
+      - ".github/workflows/android-perf.yml"
+  pull_request:
+    paths:
+      - "android-perf/**"
+      - ".github/workflows/android-perf.yml"
+
+concurrency:
+  group: android-perf-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # creates the release
+    env:
+      RELEASE: ${{ github.event_name == 'workflow_dispatch' || startsWith(github.ref, 'refs/tags/v') }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Read perf.env
+        run: |
+          source android-perf/perf.env
+          echo "UPSTREAM_APK_SHA256=$UPSTREAM_APK_SHA256" >> "$GITHUB_ENV"
+          echo "TAG=v${UPSTREAM_TAG#v}.$PERF_BUILD" >> "$GITHUB_ENV"
+
+      - name: Check the release tag
+        if: env.RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          if [ "${GITHUB_REF_TYPE}" = tag ] && [ "${GITHUB_REF_NAME}" != "$TAG" ]; then
+            echo "::error::Tag ${GITHUB_REF_NAME} doesn't match android-perf/perf.env ($TAG)."
+            exit 1
+          fi
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            echo "::error::Release $TAG already exists. Bump PERF_BUILD in android-perf/perf.env."
+            exit 1
+          fi
+
+      - name: Signing key
+        env:
+          ANDROID_KEYSTORE_B64: ${{ secrets.ANDROID_KEYSTORE_B64 }}
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+        run: |
+          KEYSTORE="$RUNNER_TEMP/signing.keystore"
+          if [ "$RELEASE" = true ]; then
+            if [ -z "$ANDROID_KEYSTORE_B64" ] || [ -z "$ANDROID_KEYSTORE_PASSWORD" ]; then
+              echo "::error::Add the ANDROID_KEYSTORE_B64 and ANDROID_KEYSTORE_PASSWORD repository secrets first (see android-perf/README.md), then re-run this job."
+              exit 1
+            fi
+            printf '%s' "$ANDROID_KEYSTORE_B64" | base64 -d > "$KEYSTORE"
+          else
+            # Test builds only: a throwaway key, so they need no secrets.
+            keytool -genkeypair -keystore "$KEYSTORE" -storetype PKCS12 -storepass throwaway \
+              -alias ci -keyalg RSA -keysize 2048 -validity 2 -dname "CN=CI test build"
+          fi
+          echo "KEYSTORE=$KEYSTORE" >> "$GITHUB_ENV"
+
+      - name: Cache upstream APK
+        uses: actions/cache@v4
+        with:
+          path: ~/apk-cache
+          key: upstream-apk-${{ env.UPSTREAM_APK_SHA256 }}
+
+      - name: Build
+        env:
+          KEYSTORE_PASSWORD: ${{ env.RELEASE == 'true' && secrets.ANDROID_KEYSTORE_PASSWORD || 'throwaway' }}
+        run: |
+          export APK_CACHE="$HOME/apk-cache"
+          android-perf/build.sh out
+          cat out/build.env >> "$GITHUB_ENV"
+
+      - name: Publish release
+        if: env.RELEASE == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          source android-perf/perf.env
+          sed -e "s|{{VERSION}}|$PERF_VERSION|g" \
+              -e "s|{{UPSTREAM_TAG}}|$UPSTREAM_TAG|g" \
+              -e "s|{{UPSTREAM_REPO}}|$UPSTREAM_REPO|g" \
+              -e "s|{{PACKAGE}}|$PERF_PACKAGE|g" \
+              -e "s|{{APK}}|$APK_NAME|g" \
+              -e "s|{{REPO}}|$GITHUB_REPOSITORY|g" \
+              -e "s|{{SHA}}|$GITHUB_SHA|g" \
+              android-perf/RELEASE_NOTES.md > "$RUNNER_TEMP/notes.md"
+          gh release create "$TAG" "out/$APK_NAME" \
+            --repo "$GITHUB_REPOSITORY" \
+            --target "$GITHUB_SHA" \
+            --title "StS2 Launcher Perf $PERF_VERSION" \
+            --notes-file "$RUNNER_TEMP/notes.md" \
+            --latest
+          echo "Published https://github.com/$GITHUB_REPOSITORY/releases/tag/$TAG" >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Summary
+        if: env.RELEASE != 'true'
+        run: |
+          echo "Test build OK: $APK_NAME ($PERF_PACKAGE $PERF_VERSION). Signed with a throwaway key; not published." >> "$GITHUB_STEP_SUMMARY"

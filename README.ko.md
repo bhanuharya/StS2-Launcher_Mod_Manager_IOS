@@ -6,11 +6,13 @@
 
 **이 포크에서 추가된 것: 실험적인 iOS 포트** (iPhone / iPad). Mac 없이 GitHub 의 macOS 클라우드 러너에서 빌드하고, Windows 에서 무료 Apple ID 로 사이드로드합니다. [iPhone / iPad (실험적)](#iphone--ipad-실험적) 참조.
 
+**이 포크의 또 다른 추가: StS2 Launcher Perf** — 업스트림 릴리즈에 영문 런처와, APK 재빌드 없이 바꿀 수 있는 성능 설정(FPS 제한, 수직동기화, 파티클, 해상도, 효과, 프레임 시간 로그)을 더한 안드로이드 빌드입니다. 기존 앱과 별도로 설치됩니다. [안드로이드 성능 빌드](#안드로이드-성능-빌드-저사양-기기용) 참조.
+
 **현재 릴리즈: [v0.3.34](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest)** (versionCode 314)
 
 > **📖 사용설명서** — 설치부터 모드/세이브 관리까지 스크린샷과 함께 설명하는 단계별 가이드: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**
 
-> **포크 안내** — 이 저장소는 iOS 포트(`ios/`)를 추가하기 위해 [iunius612/StS2-Launcher_Mod_Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager) 를 포크한 것입니다. 안드로이드 런처는 그대로이며, 릴리즈와 이슈는 원본 저장소에서 관리됩니다. 원본 역시 [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher) 의 커뮤니티 포크입니다. 업스트림 런처의 모드 로더가 최신 게임 빌드에서 작동하지 않게 되어, 이 포크는 게임 업데이트마다 모드 로딩 호환성을 유지하면서 창작마당 지원·세이브 안전장치·모바일 UX 개선을 추가합니다. [업스트림과의 차이](#업스트림과의-차이) 참조.
+> **포크 안내** — 이 저장소는 iOS 포트(`ios/`)와 안드로이드 성능 빌드(`android-perf/`)를 추가하기 위해 [iunius612/StS2-Launcher_Mod_Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager) 를 포크한 것입니다. 안드로이드 런처 소스는 그대로이며, 릴리즈와 이슈는 원본 저장소에서 관리됩니다. 원본 역시 [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher) 의 커뮤니티 포크입니다. 업스트림 런처의 모드 로더가 최신 게임 빌드에서 작동하지 않게 되어, 이 포크는 게임 업데이트마다 모드 로딩 호환성을 유지하면서 창작마당 지원·세이브 안전장치·모바일 UX 개선을 추가합니다. [업스트림과의 차이](#업스트림과의-차이) 참조.
 
 > **면책** — 비공식 커뮤니티 프로젝트입니다. Slay the Spire 2 는 Mega Crit Games 가 개발·배급합니다. Slay the Spire 2 를 소유한 유효한 Steam 계정이 필요하며, 게임 파일은 인증 후 Steam 에서 직접 다운로드됩니다. 이 저장소에는 게임 에셋이 포함되어 있지 않습니다.
 
@@ -28,7 +30,7 @@
 
 iOS 는 Harmony 패칭과 런타임 DLL 로딩에 필요한 JIT 를 허용하지 않기 때문에, 안드로이드 런처를 그대로 쓸 수 없습니다. 그래서 iOS 포트는 다음과 같이 동작합니다.
 
-- **사전(AOT) 컴파일.** GitHub macOS 러너가 본인 계정으로 Steam 에 로그인합니다(로그인 승인은 Steam 모바일 앱에서). 게임 어셈블리를 받아 Mono.Cecil 로 `sts2.dll` 에 플랫폼 패치를 빌드 시점에 적용하고, .NET NativeAOT 로 ARM64 네이티브 코드로 컴파일합니다. iOS 에서 게임 코드를 가장 빠르게 실행하는 방법이기도 합니다.
+- **사전(AOT) 컴파일.** GitHub macOS 러너가 본인 계정으로 Steam 에 로그인합니다(빌드가 여는 이슈에 Steam Guard 코드를 답글로 보냅니다). 게임 어셈블리를 받아 Mono.Cecil 로 `sts2.dll` 에 플랫폼 패치를 빌드 시점에 적용하고, .NET NativeAOT 로 ARM64 네이티브 코드로 컴파일합니다. iOS 에서 게임 코드를 가장 빠르게 실행하는 방법이기도 합니다.
 - **게임 데이터는 본인 것.** 앱에는 `SlayTheSpire2.pck` 가 들어 있지 않습니다. PC 의 Steam 폴더에서 앱 폴더로 직접 복사하며, 앱이 빌드와 버전이 맞는지 확인합니다.
 - **빌드 결과물은 비공개.** 이 저장소는 공개 저장소이고 앱에는 컴파일된 게임 코드가 들어 있으므로, 결과물은 본인이 정한 비밀번호로 암호화된 zip 으로만 업로드됩니다.
 - iOS 에서는 **모드를 쓸 수 없고**, Steam 온라인 기능도 지원하지 않습니다.
@@ -37,10 +39,21 @@ iOS 는 Harmony 패칭과 런타임 DLL 로딩에 필요한 JIT 를 허용하지
 
 1. **Actions → "iOS probe (phase 0)"** 의 프로브 앱을 사이드로드해, 기기에서 사이드로드가 되는지 확인합니다. 리포트에 GPU 가 PC 판 텍스처를 그대로 읽을 수 있는지도 표시됩니다.
 2. 저장소 시크릿 `STEAM_USERNAME`, `STEAM_PASSWORD`, `IPA_PASSWORD` 를 추가합니다.
-3. **Actions → "iOS game build"** 를 source `steam` 으로 실행하고, 폰의 Steam 앱에서 로그인을 승인합니다.
+3. **Actions → "iOS game build"** 를 source `steam` 으로 실행하고, 빌드가 여는 이슈에 Steam 앱의 Steam Guard 코드를 답글로 보냅니다.
 4. 결과물을 7-Zip 으로 풀고, `StS2.ipa` 를 Sideloadly 로 설치한 뒤, `SlayTheSpire2.pck` 를 앱 폴더에 복사하면 플레이할 수 있습니다.
 
 전체 가이드, 문제 해결, 빌드 구조 (영문): **[ios/README.md](ios/README.md)**
+
+## 안드로이드 성능 빌드 (저사양 기기용)
+
+**StS2 Launcher Perf** 는 업스트림 릴리즈 APK 에 작은 애드온을 더한 빌드로, 이 포크의 [릴리즈 페이지](../../releases/latest)에 올라갑니다.
+
+- **Perf settings** (런처 메인 화면의 **Debug** 버튼 옆): FPS 제한, 수직동기화, 파티클 양, 낮은 렌더 해상도, 전체 화면 효과, 벤치마크용 프레임 시간 로그. 기본값은 아무것도 바꾸지 않습니다. 설정은 앱이 2초마다 다시 읽는 텍스트 파일에 저장되므로, 플레이 중에 adb 로도 바꿀 수 있습니다.
+- 한국어로만 나오던 런처 대화상자가 영어로 바뀝니다.
+- 별도 패키지 ID(`com.game.sts2launcher.modmanager.perf`)를 쓰므로 기존 앱의 데이터를 건드리지 않고 나란히 설치됩니다.
+- 나머지는 업스트림 코드 그대로입니다. 런처 업데이트 확인만 이 포크를 바라봅니다.
+
+게임 파일 없이 업스트림이 공개한 APK 로 GitHub 에서 빌드됩니다. 자세한 내용, 설치 방법, 릴리즈 방법 (영문): **[android-perf/README.md](android-perf/README.md)**
 
 ## 업스트림과의 차이
 
@@ -146,6 +159,7 @@ android/                   # Godot 안드로이드 gradle 프로젝트
 tools/memberref-audit/     # 새 게임 빌드 대비 패치 IL 정적 감사
 scripts/                   # 빌드·툴링 스크립트
 docs/                      # 사용설명서 + 이미지
+android-perf/              # 안드로이드 성능 빌드 (android-perf/README.md 참조)
 ios/                       # iOS 포트 (ios/README.md 참조)
   probe/                   # Phase 0 프로브 앱 (기기·툴체인 확인)
   game/                    # iOS 익스포트를 구동하는 스텁 Godot 프로젝트
@@ -155,7 +169,7 @@ ios/                       # iOS 포트 (ios/README.md 참조)
   tools/                   # IL 패처, .pck / project.binary 도구
   scripts/                 # 빌드 스크립트 (CI) + Linux 리허설
   test/                    # 파이프라인 테스트용 대역 게임
-.github/workflows/         # iOS 프로브 + iOS 게임 빌드 (GitHub macOS 러너)
+.github/workflows/         # iOS 프로브 + iOS 게임 빌드, 안드로이드 성능 빌드
 ```
 
 ### 사전 요구사항

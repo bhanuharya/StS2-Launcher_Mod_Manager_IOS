@@ -1,216 +1,324 @@
-# StS2 Launcher Mod Manager
+# Slay the Spire 2 on Android and iOS
 
 **English** | [한국어](README.ko.md)
 
-An Android launcher + mod manager for **Slay the Spire 2**, built on a custom Godot 4.5.1 engine with .NET/Mono and Harmony runtime patching. Log in with Steam, download the game, browse the Steam Workshop, and play with mods — all on your phone.
+Play your own Steam copy of **Slay the Spire 2** on Android phones and
+tablets, and on iPhone and iPad.
 
-**New in this fork: an experimental iOS port** for iPhone and iPad. It's built in the cloud on GitHub's macOS runners, so no Mac is needed, and sideloaded from Windows with a free Apple ID. See [iPhone / iPad (experimental)](#iphone--ipad-experimental).
+This repository is a fork of [iunius612/StS2-Launcher_Mod_Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager),
+the Android launcher and mod manager. It adds an **iOS port** (`ios/`) and a
+**performance build for lower-end Android devices** (`android-perf/`). The
+Android launcher's own code (`src/`, `android/`) is upstream's, unchanged; its
+releases and issues live upstream.
 
-**Current release: [v0.4.1](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest)**
+| | Android launcher | Android Perf | iPhone / iPad |
+|---|---|---|---|
+| What it is | The upstream launcher and mod manager | The upstream launcher with performance settings and English text | A native iOS build of your own copy of the game |
+| Get it | APK from [upstream Releases](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest) | APK from [this fork's Releases](../../releases/latest) | Build it with GitHub Actions on your fork, install with Sideloadly |
+| Steam login and download | In the app | In the app | On GitHub's build machine; you copy `SlayTheSpire2.pck` from your PC |
+| Steam Cloud saves | Yes | Yes | No, saves are copied by hand |
+| Mods and Workshop | Yes | Yes | No |
+| Performance settings | No | Yes | No |
+| Status | Stable | Stable | Experimental. The game runs (v0.107.1), with rough edges |
 
-> **📖 사용설명서 (한국어)** — 설치부터 모드/세이브 관리까지 스크린샷과 함께 설명하는 단계별 가이드: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**
+> **Disclaimer.** Unofficial community project. Slay the Spire 2 is developed
+> and published by Mega Crit Games. You need a Steam account that owns the
+> game. Game files come from Steam with your login; none are in this
+> repository, and the iOS build is only ever uploaded encrypted.
 
-> **Fork notice** — This repository forks [iunius612/StS2-Launcher_Mod_Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager) to add the iOS port (`ios/`). The Android launcher is unchanged; its releases and issues live upstream. That project is itself a community fork of [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher). The upstream launcher's mod loader stopped working with newer game builds; this fork keeps mod loading compatible with each game update and adds Workshop support, save-data safety features, and mobile-UX improvements. See [Differences from upstream](#differences-from-upstream).
+- [Android](#android)
+  - [Install the launcher](#install-the-launcher)
+  - [Android perf build (lower-end devices)](#android-perf-build-lower-end-devices)
+  - [Mods](#mods)
+  - [LAN multiplayer](#lan-multiplayer)
+  - [What the launcher adds](#what-the-launcher-adds)
+- [iPhone and iPad (experimental)](#iphone-and-ipad-experimental)
+- [Development](#development)
+- [License](#license)
 
-> **Disclaimer** — Unofficial community project. Slay the Spire 2 is developed and published by Mega Crit Games. A valid Steam account that owns Slay the Spire 2 is required; game files are downloaded directly from Steam after authentication. No game assets are included in this repository.
+## Android
 
-## Getting started (players)
+### Install the launcher
 
-1. Download the latest `StS2Launcher-vX.Y.Z.apk` from the [Releases page](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest) and install it.
-2. Launch, grant "All files access", and log in with your Steam account (Steam Guard 2FA supported).
-3. Pick a Steam branch and download the game (~3 GB), then tap **PLAY**.
+1. Download the latest `StS2Launcher-vX.Y.Z.apk` from the
+   [upstream Releases page](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest)
+   and install it.
+2. Open it, allow "All files access", and log in with Steam (Steam Guard is
+   supported).
+3. Pick a Steam branch, download the game (about 3 GB), and tap **PLAY**.
 
-Full walkthrough with screenshots: [사용설명서 (USER_GUIDE.md)](docs/USER_GUIDE.md). Upgrading between fork versions is a drop-in APK install — saves, login, and the game payload are preserved.
+Updating is a plain APK install over the old one; saves, login and the game
+download are kept. Step-by-step guide with screenshots (Korean):
+[docs/USER_GUIDE.md](docs/USER_GUIDE.md).
 
-## iPhone / iPad (experimental)
+### Android perf build (lower-end devices)
 
-Runs your own Steam copy of the game natively on iOS. **Status:** the build pipeline works end to end on a stand-in game, both on Linux and in macOS CI, but hasn't run the real game on a device yet. Expect early fixes.
+**StS2 Launcher Perf** is the upstream APK with a small add-on, published on
+[this fork's Releases page](../../releases/latest). It was made on a Xiaomi
+Pad 5.
 
-The Android launcher can't be reused as-is on iOS, because iOS forbids the JIT compiler that Harmony and runtime DLL loading need. So the iOS port works differently:
+- **Perf settings** button next to **Debug**: FPS cap, vsync, particle
+  amount, a lower render resolution, full-screen effects, and a frame-time log
+  for benchmarking. The defaults change nothing.
+- Settings live in a text file the app re-reads every 2 seconds, so they can
+  also be changed over adb while you play.
+- The launcher's Korean-only dialogs are in English.
+- Its own package (`com.game.sts2launcher.modmanager.perf`), so it installs
+  **next to** the original app without touching its data.
 
-- **Ahead-of-time compiled.** A GitHub macOS runner logs into Steam with your account (you approve the sign-in in the Steam mobile app). It downloads the game's assemblies, applies the platform patches to `sts2.dll` at build time with Mono.Cecil, and compiles everything to native ARM64 code with .NET NativeAOT. This is also the fastest way to run the game's code on iOS.
-- **Your game data, not ours.** The app doesn't contain `SlayTheSpire2.pck`. You copy it from your PC's Steam folder into the app's folder, and the app checks that it matches the build.
-- **Private build output.** This repo is public and the app contains compiled game code, so the build is only uploaded inside a zip encrypted with a password you set.
-- **No mods** on iOS, and no Steam online features.
+On a 120 Hz tablet, the biggest win was the FPS cap: 40 or 60 fps (a divisor
+of the refresh rate) instead of the game's 30. Details, the settings file, and
+how releases are built: [android-perf/README.md](android-perf/README.md).
 
-Quick start:
+### Mods
 
-1. Sideload the probe app from **Actions → "iOS probe (phase 0)"** to check that sideloading works on your device. Its report shows whether the GPU reads the PC game's textures natively.
-2. Add the `STEAM_USERNAME`, `STEAM_PASSWORD`, and `IPA_PASSWORD` repository secrets.
-3. Run **Actions → "iOS game build"** with source `steam` and approve the Steam sign-in on your phone.
-4. Unzip the artifact with 7-Zip, sideload `StS2.ipa` with Sideloadly, copy `SlayTheSpire2.pck` into the app's folder, and play.
+**Workshop (recommended):** tap **MOD MANAGER** on the launch screen, browse
+or search the WORKSHOP tab, and subscribe. Downloads, installs and updates are
+automatic.
 
-Full guide, troubleshooting, and how the build works: **[ios/README.md](ios/README.md)**.
-
-## Differences from upstream
-
-The fork diverged from `Ekyso/StS2-Launcher` in April 2026. Everything below is fork-added; per-version details live on the [Releases page](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases).
-
-### Mod loading that tracks game updates
-
-- The upstream reflection-based mod loader crashes on current game builds (renamed private fields). Replaced with a Harmony IL transpiler that redirects the game's own mod scanner to `/storage/emulated/0/StS2LauncherMM/Mods/`.
-- Kept compatible through breaking game updates since then: v0.107 async-lowering changes (issue #47), v0.108 `ModelDb` contract change (issue #53), the v0.108 save-path helper signature change, and a general fix for init-setter properties under runtime IL re-emit that unblocked BaseLib 3.3.x (issue #55).
-- `tools/memberref-audit` statically audits our IL patches against a new game build before it ships, so signature breaks are caught before users hit them.
-
-### Steam Workshop support (Mod Hub)
-
-Added in v0.3.34 (issue #58) — the **MOD MANAGER** button opens a full in-app Mod Hub:
-
-- **WORKSHOP tab** — browse/search the Workshop with sorting, tag filters, and infinite scroll; paste a Workshop URL/ID to find unlisted items; item detail pages with description, Steam change notes, discussions, and comments.
-- **SUBSCRIBED tab** — subscriptions sync with your Steam account; downloads, update detection, and dependency prompts are automatic. Unsubscribing removes the mod from the device.
-- **Mod stash (DISABLE)** — hide a mod from the game without deleting it (moved to `ModsDisabled/`, restored instantly with ENABLE, no re-download).
-- Downloads use SteamKit2 `PublishedFile` RPC + Steam depot CDN — no PC or Steamworks SDK involved.
-
-### Save-data safety
-
-- **Cloud-save destruction fix (issue #4)** — the upstream launcher could silently overwrite real Steam Cloud progress with fresh-default saves when the cloud file cache wasn't loaded yet. The cloud store now blocks until the cache is ready and falls back to local-only mode when it isn't.
-- **Save Manager (issues #4/#7)** — explicit conflict-resolution dialog replaces silent timestamp-based sync: side-by-side local/cloud summary cards (including the in-progress run) with an explicit Keep Local / Keep Cloud choice, on every PLAY and on demand via the **SAVE MANAGER** button.
-- **Cloud write guard + Local Backup (issue #36)** — empty/abnormal writes are blocked at the single cloud-upload funnel, and full-tree save snapshots are taken manually (**LOCAL BACKUP** button, kept indefinitely) and automatically before every cloud handshake (FIFO-capped), so a wrong sync choice is recoverable.
-
-### Launcher quality-of-life
-
-- **Self-update (issue #12)** — separate `CHECK GAME UPDATE` / `CHECK LAUNCHER UPDATE` buttons, automatic update check on boot, and an in-app APK download + install flow.
-- **Steam branch picker** — choose `public`, `public-beta`, etc. per download; switching branches forces a clean re-download to avoid delta corruption.
-- **Mobile UX** — sensor-based landscape rotation, layout reflow across fold/unfold, split-screen, portrait-aspect windows, and 21:9 displays, rewritten touch scrolling with fling, back-button guard, and virtual-keyboard-aware panels.
-- **Diagnostics without adb** — persistent Debug toggle captures logcat to `StS2LauncherMM/Logs/` (auto-rotated) so users can attach logs to issues.
-
-### Mod-compatibility shims
-
-- **BaseLib** — v3.x used to hard-crash the game on Android with a black screen (issues #8/#32/#55). Current builds load and run BaseLib and its dependents, with one remaining trade-off: BaseLib's **async hook system** (`AfterCardPlayed` etc.) is intentionally no-op'd on mobile because its state-machine IL surgery corrupts memory on Mono Android. Mods that add content through BaseLib's non-hook APIs work normally; mods that rely on async hooks load but those triggers never fire.
-- **`release_info.json` on Android (issue #9)** — fixes the `????` main-menu build label and LAN version-mismatch handshake failures.
-- **LAN multiplayer fixes** — 4-player sessions (issue #18), persistent client netId (issue #26), and cloud "zombie run" cleanup (issue #31).
-
-### Separate app identity
-
-Package id is `com.game.sts2launcher.modmanager` and external storage lives under `/storage/emulated/0/StS2LauncherMM/` — the fork installs alongside the upstream APK without sharing data, and the app label is **"StS2 Launcher Mod"**.
-
-## Features
-
-- **Steam authentication** — SteamKit2 login with Steam Guard 2FA; refresh tokens encrypted at rest via Android Keystore (AES-256-GCM, hardware-backed TEE).
-- **Game download** — Steam depot download with update checking and branch selection.
-- **Steam Workshop** — in-app browse, subscribe, auto-download/update, and mod enable/disable.
-- **Cloud saves** — full Steam Cloud sync via SteamKit2's CCloud API with an explicit conflict-resolution UI and destructive-write guards.
-- **Local backup** — manual and automatic full-tree save snapshots to external storage.
-- **Launcher self-update** — in-app update check and APK install flow.
-- **Mobile adaptation** — touch input, UI scaling, foldable/rotation layout handling, and app lifecycle handling via Harmony runtime patches.
-- **LAN multiplayer** — UDP broadcast discovery and manual IP join (see [LAN Multiplayer](#lan-multiplayer)).
-- **Shader warmup** — Vulkan pipeline cache persistence and canvas ubershaders to eliminate first-encounter stutters.
-
-## Installing mods
-
-**Workshop (recommended)** — tap **MOD MANAGER** on the launch screen, browse or search the WORKSHOP tab, and subscribe. Download, installation, and updates are automatic. See the [사용설명서](docs/USER_GUIDE.md) for details.
-
-**Manual install** — for mods not on the Workshop, drop each mod as its own subfolder under `/storage/emulated/0/StS2LauncherMM/Mods/` using any file manager. A valid mod folder contains the mod's `.dll`, optional `.pck`, and a `<ModId>.json` manifest at its root — the same layout PC users put in `Steam\steamapps\common\Slay the Spire 2\mods\`.
+**Manual:** put each mod in its own folder under
+`/storage/emulated/0/StS2LauncherMM/Mods/`. A mod folder holds the mod's
+`.dll`, an optional `.pck`, and a `<ModId>.json` manifest, the same layout as
+`Steam\steamapps\common\Slay the Spire 2\mods\` on PC.
 
 ![Mods folder layout](docs/images/mods_folder.jpg)
 
-Launch the game and tap PLAY; accept the game's built-in "Load mods?" dialog and the game restarts once through the launcher with mods loaded. If mods don't appear, turn on the Debug toggle and check the log for `[Mods]` lines.
+Tap PLAY and accept the game's "Load mods?" dialog; the game restarts once
+with mods loaded. If a mod doesn't show up, turn on the Debug toggle and look
+for `[Mods]` lines in the log.
 
-### Known incompatibilities
+Mods that call **Steamworks.NET** directly (for example QuickReload) crash on
+PLAY: Valve doesn't ship the Steamworks library for Android, and the
+launcher's stub only satisfies the linker. Some Steamworks features (SteamID,
+auth tickets, achievements, cloud, UGC, leaderboards) could be bridged through
+SteamKit2 per mod; open an issue upstream if you need one. Steam networking
+P2P, the overlay and Steam Input can't be.
 
-Mods that import **Steamworks.NET** directly (e.g. QuickReload) crash on PLAY — Valve does not ship the Steamworks SDK native library for Android, and the launcher's stub `libsteam_api.so` only satisfies the linker. Several Steamworks API surfaces (SteamID, auth tickets, achievements/stats, cloud, UGC, leaderboards) can in principle be bridged through SteamKit2 and may be shimmed per-mod — file an issue if a specific mod needs one. Genuinely unbridgeable: SteamNetworkingSockets P2P, the Steam overlay, and SteamInput.
+### LAN multiplayer
 
-## Release history
+Both devices must be on the same network. The app finds nearby games by UDP
+broadcast, or you can enter the PC's IP address.
 
-Per-version changelogs (in Korean, with technical notes) are on the [Releases page](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases). Fork-change details for 0.2.x–0.3.11 that used to live in this README are preserved in the [git history](https://github.com/iunius612/StS2-Launcher_Mod_Manager/blob/v0.3.23/README.md).
+On the PC, add `--fastmp` to the launch options (**Steam → Slay the Spire 2 →
+Properties → Launch Options**). Keep the PC and the phone on the **same Steam
+branch**; cloud saves from one branch can't be read on another.
+
+### What the launcher adds
+
+The launcher descends from [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher),
+whose mod loader stopped working with newer game builds. Upstream (iunius612)
+added the following; per-version notes are on the
+[upstream Releases page](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases).
+
+- **Mod loading that follows game updates.** A Harmony IL transpiler points
+  the game's own mod scanner at `StS2LauncherMM/Mods/`, kept working through
+  the v0.107 and v0.108 changes. `tools/memberref-audit` checks the patches
+  against each new game build before release.
+- **Steam Workshop (Mod Hub).** Browse, search, subscribe, update, and stash
+  mods without deleting them, using SteamKit2; no PC needed.
+- **Save safety.** A Save Manager with an explicit Keep Local / Keep Cloud
+  choice on every PLAY, a guard against empty or abnormal cloud writes, and
+  manual plus automatic local backups.
+- **Quality of life.** In-app game and launcher updates, a Steam branch
+  picker, landscape rotation and foldable/split-screen layouts, smooth touch
+  scrolling, and a Debug toggle that saves logs to `StS2LauncherMM/Logs/`.
+- **Mod compatibility shims.** BaseLib 3.x and its dependents load (its async
+  hooks are disabled on Android), `release_info.json` is provided for the
+  version label and LAN handshake, and several LAN fixes (4 players,
+  persistent client IDs, stale cloud runs).
+
+Core features: SteamKit2 login with tokens encrypted by Android Keystore,
+Steam depot download with branch selection, full Steam Cloud sync, LAN
+multiplayer, and engine patches for shader stutter (Vulkan pipeline cache
+persistence and canvas ubershaders).
+
+## iPhone and iPad (experimental)
+
+Runs your own copy of the game **natively** on iOS. The real game (v0.107.1)
+starts and plays on an iPhone.
+
+The Android launcher can't simply be rebuilt for iOS, because iOS doesn't
+allow the JIT compiler that runtime patching and mod loading need. So the iOS
+port works differently:
+
+- **Compiled ahead of time.** A GitHub macOS runner downloads the game's code
+  from Steam with your login, applies the mobile fixes to `sts2.dll`, and
+  compiles everything to native ARM64 with .NET NativeAOT. No Mac needed on
+  your side.
+- **Your game data stays yours.** The app doesn't contain
+  `SlayTheSpire2.pck`. You copy it from your PC, and the app checks that it
+  matches the build.
+- **Private by default.** This repository is public, so the app is only
+  uploaded inside a zip encrypted with your password.
+
+### Known issues
+
+- **Short freezes.** Now and then the game stops for a moment and then carries
+  on; it doesn't crash. Being looked into.
+- **No Steam features.** No cloud saves, achievements or Steam lobbies. Saves
+  are copied between PC and phone by hand.
+- **No mods.** Mods are compiled code, and iOS can't load new code.
+- **Re-sign every 7 days.** A free Apple ID signature lasts 7 days; refresh it
+  with Sideloadly. In October 2026, SideStore and AltStore sign-ins were
+  failing for everyone (Apple error -80045); Sideloadly on a PC with Apple's
+  iTunes and iCloud worked.
+- **Small UI on phones.** It's the PC interface; the Android launcher's mobile
+  UI fixes aren't ported yet.
+
+### What you need
+
+- A Steam account that owns the game, with **Steam Guard in the Steam app**
+  (or e-mail codes).
+- A GitHub account with a fork of this repository.
+- A **Windows PC or Mac** with Steam (for `SlayTheSpire2.pck` and your saves)
+  and **Sideloadly**, plus Apple's **iTunes** and **iCloud** from apple.com
+  (not the Microsoft Store versions).
+- An iPhone or iPad on iOS 16 or later, a USB data cable, and an Apple ID (a
+  spare one is fine).
+
+### Set up once
+
+1. In your fork, open the **Actions** tab and enable workflows.
+2. **Settings → General → Features:** turn on **Issues**. The build asks for
+   your Steam Guard code there.
+3. **Settings → Secrets and variables → Actions:** add `STEAM_USERNAME`,
+   `STEAM_PASSWORD`, and `IPA_PASSWORD` (a password you make up for the
+   download).
+4. On the iPhone: **Settings → Privacy & Security → Developer Mode** on.
+
+### Build and install
+
+1. **Actions → "iOS game build" → Run workflow**, source `steam`.
+2. About a minute later GitHub notifies you of an issue, **"Steam Guard code
+   for iOS build #N"**. Open the Steam app's **Steam Guard** tab and reply
+   with the code. If the Steam app then asks to approve a sign-in, **don't
+   approve it**; Steam blocks approvals from the build machine's location,
+   and the code already signed it in.
+3. After about 15 minutes, download the **StS2-ios-…** artifact from the run
+   (kept for 3 days). Open the zip inside it with **7-Zip** and your
+   `IPA_PASSWORD`.
+4. Install `StS2.ipa` with **Sideloadly** over USB. Then on the iPhone:
+   **Settings → General → VPN & Device Management** → your Apple ID →
+   **Trust**.
+5. Copy `SlayTheSpire2.pck` from **Steam → Slay the Spire 2 → Manage → Browse
+   local files** into the app's folder: in the **Apple Devices** app (Windows
+   11) or **iTunes → File Sharing** (Windows 10), choose **StS2** and add the
+   file. It ends up in **Files → On My iPhone → StS2**.
+6. Open **StS2**. If the `.pck` is missing or from another game version, the
+   app tells you instead of starting.
+
+When Steam updates the game, build again and copy the new `.pck`; the two
+have to match. Full guide, troubleshooting, and how the build works:
+**[ios/README.md](ios/README.md)**.
+
+### Future improvements
+
+Planned, roughly in this order. None of these are built yet.
+
+1. **Find and fix the short freezes.** The next build logs every slow frame
+   with its cause (graphics pipelines compiled, textures loaded, or .NET
+   garbage collection).
+2. **Steam login in the app, with Steam Cloud saves.** The Android launcher
+   talks to Steam through SteamKit2, a pure .NET library, so the same login
+   and the Save Manager (Keep Local / Keep Cloud) can be compiled into the iOS
+   build. Signing in from your own phone also avoids Steam blocking the build
+   machine's location. This replaces copying saves by hand. The first step is
+   checking that SteamKit2 works when compiled ahead of time.
+3. **Download `SlayTheSpire2.pck` in the app** from Steam, as the Android
+   launcher downloads the game, so the PC is no longer needed for game data.
+4. **Automatic builds on game updates.** With a saved Steam login
+   (`STEAM_REFRESH_TOKEN`), a daily workflow can check Steam for a new game
+   build and produce a new `StS2.ipa` without asking for a code. Updating then
+   means one Sideloadly install, which a free Apple ID needs every 7 days
+   anyway.
+5. **Phone-friendly UI.** Port the Android launcher's mobile fixes as
+   build-time patches: UI scale for phone screens, touch-friendly tooltips,
+   and suspend/resume handling.
+6. **Achievements**, probably possible through the same Steam connection.
+
+What iOS rules out:
+
+- **Game updates without reinstalling.** A game update changes the game's
+  code, and iOS doesn't let an app load new code, so every update is a new
+  build and a reinstall. Running new code would take a Godot build with a
+  .NET interpreter: a large engine project, and the game would run
+  noticeably slower.
+- **Mods**, for the same reason.
+- **Steam lobbies and P2P multiplayer**, and the Steam overlay.
 
 ## Development
 
-### How it works
+### Android launcher
 
-At startup, `STS2Mobile.dll` is loaded via `coreclr_create_delegate` and applies [Harmony](https://github.com/pardeike/Harmony) patches to adapt the desktop game for mobile. The launcher intercepts `GameStartupWrapper()` to present a Steam login screen before the game starts.
+At startup, `STS2Mobile.dll` is loaded via `coreclr_create_delegate` and
+applies [Harmony](https://github.com/pardeike/Harmony) patches that adapt the
+desktop game to mobile. The launcher intercepts `GameStartupWrapper()` to
+show a Steam login screen before the game starts. With no game files present,
+a small `bootstrap.pck` provides just the launcher UI.
 
-- **Launcher-only mode** — with no game files present, a minimal `bootstrap.pck` provides the launcher UI for Steam login and game download.
-- **Normal mode** — with game files downloaded, all patches apply against `sts2.dll` and the game runs natively after authentication.
+The engine is Godot 4.5.1 with Android patches: Vulkan pipeline cache
+persistence (saved when the app loses focus, so Android killing the process
+doesn't force recompiles) and canvas ubershaders (no blocking pipeline
+compiles for 2D effects).
 
-### Engine patches
+Building needs binaries that aren't in this repository: the custom Godot
+engine ([godotengine/godot](https://github.com/godotengine/godot) based),
+Harmony ([Ekyso/Harmony](https://github.com/Ekyso/Harmony), built for .NET 9),
+the game files in `upstream/godot-export/`, and the FMOD SDK in
+`vendor/fmod-sdk/`. FMOD and Spine can't be redistributed; see
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). With those in place
+(.NET 9 SDK, Android SDK and NDK per `android/config.gradle`, Python 3):
 
-Custom patches to the Godot 4.5.1 engine source for Android-specific issues:
+```bash
+bash scripts/build.sh      # publish the patcher, copy DLLs, build the APK
+adb install -r android/build/outputs/apk/mono/release/StS2Launcher-v*.apk
+```
 
-- **Vulkan pipeline cache persistence** — saves compiled pipelines when the app loses focus, preventing recompilation after Android kills the process.
-- **Canvas ubershaders** — ubershader fallback for 2D rendering, eliminating first-encounter VFX stutters from blocking pipeline compilation.
+Other scripts: `scripts/make-bootstrap-pck.py` (only if `project.godot`
+changes), `scripts/build-godot.sh` (engine), `src/stubs/build_stubs.sh`
+(no-op Steam API and Sentry libraries, needs the NDK).
+
+### Android perf build
+
+Built on GitHub from upstream's published APK; no game files and no engine
+build involved. A Mono.Cecil patcher makes the launcher load an add-on DLL,
+and the add-on hooks the launcher with Harmony. See
+[android-perf/README.md](android-perf/README.md).
+
+### iOS port
+
+Built entirely on GitHub's macOS runners. `ios/scripts/rehearse-linux.sh`
+runs the platform-independent half on Linux against a stand-in game, and
+pushes to `ios/` run the full iOS build on that stand-in game in CI. See
+[ios/README.md](ios/README.md).
 
 ### Project structure
 
 ```
-src/STS2Mobile/
-  ModEntry.cs              # Entry point ([UnmanagedCallersOnly] Apply())
-  PatchHelper.cs           # Shared patch utility + logging
-  Patches/                 # Harmony patches (one file per concern)
-  Launcher/                # Programmatic Godot UI (MVC) incl. Mod Hub / Workshop
-  Steam/                   # SteamKit2 login, depot download, cloud saves, Workshop
-src/stubs/                 # Native library stubs (Steam API, Sentry)
-android/                   # Godot Android gradle project
-  src/.../GodotApp.java    # Activity, assembly setup, Keystore encryption
-  assets/bootstrap.pck     # Minimal PCK for launcher-only mode
-tools/memberref-audit/     # Static IL audit of patches vs. a new game build
-scripts/                   # Build and tooling scripts
-docs/                      # User guide (Korean) + images
-ios/                       # iOS port (see ios/README.md)
-  probe/                   # Phase 0 probe app (device + toolchain check)
-  game/                    # Stub Godot project that drives the iOS export
-  aot/                     # NativeAOT of the prebuilt sts2.dll
-  support/                 # Managed hooks compiled into the iOS build
-  boot/                    # ios_boot GDExtension: mounts the game pck at startup
-  tools/                   # IL patcher, .pck / project.binary tools
-  scripts/                 # Build scripts (CI) + Linux rehearsal
-  test/                    # Stand-in game for pipeline tests
-.github/workflows/         # iOS probe + iOS game builds (GitHub macOS runners)
+src/STS2Mobile/            Android launcher: entry point, Harmony patches,
+                           launcher UI, Steam login/download/cloud/Workshop
+src/stubs/                 No-op native libraries (Steam API, Sentry)
+android/                   Godot Android Gradle project
+tools/memberref-audit/     Checks the IL patches against a new game build
+scripts/                   Android build scripts
+docs/                      User guide (Korean) and images
+android-perf/              Android perf build: add-on, patcher, APK tools
+ios/                       iOS port
+  probe/                   Small test app (device and toolchain check)
+  game/                    Stub Godot project that drives the iOS export
+  aot/                     NativeAOT of the prebuilt sts2.dll
+  support/                 Managed hooks compiled into the iOS build
+  boot/                    ios_boot GDExtension: mounts the game's .pck
+  tools/                   IL patcher, .pck and project.binary tools,
+                           SteamFetch (Steam download), Steam Guard relay
+  scripts/                 Build scripts and the Linux rehearsal
+  test/                    Stand-in game for pipeline tests
+.github/workflows/         iOS game and probe builds, SteamFetch, Android perf
 ```
-
-### Prerequisites
-
-- .NET 9 SDK
-- Android SDK + NDK (see `android/config.gradle` for versions)
-- Python 3 (for `make-bootstrap-pck.py` and SCons)
-- Original game files in `upstream/godot-export/`
-- Custom Godot engine build (see `scripts/build-godot.sh`)
-- FMOD SDK in `vendor/fmod-sdk/`
-
-### Building
-
-> **Note**: the build requires binaries that are not in this repository. The custom Godot engine is based on [godotengine/godot](https://github.com/godotengine/godot) and Harmony on [Ekyso/Harmony](https://github.com/Ekyso/Harmony) (compiled for .NET 9) — see the upstream project for engine details. FMOD and Spine cannot be redistributed for licensing reasons; see [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md).
-
-```bash
-bash scripts/build.sh
-```
-
-This runs the full pipeline: `dotnet publish` the patcher → copy published DLLs to `android/assets/dotnet_bcl/` → copy the Android crypto native lib to JNI libs → bump the version in `gradle.properties` → build the APK via `./gradlew assembleMonoRelease`.
-
-Output: `android/build/outputs/apk/mono/release/StS2Launcher-v<version>.apk`
-
-```bash
-# Install to a device
-adb install -r android/build/outputs/apk/mono/release/StS2Launcher-v*.apk
-
-# Fresh install (clear saved credentials + cached assemblies)
-adb shell pm clear com.game.sts2launcher.modmanager
-
-# Regenerate bootstrap PCK (only if project.godot changes)
-python3 scripts/make-bootstrap-pck.py
-
-# Rebuild Godot engine (only if engine source changes)
-bash scripts/build-godot.sh
-
-# Rebuild native stubs (requires Android NDK)
-bash src/stubs/build_stubs.sh
-```
-
-### Technical notes
-
-- Native library stubs (`src/stubs/`) provide no-op `.so` files for desktop-only libraries (Steamworks SDK, Sentry) so the linker is satisfied at runtime.
-- The bootstrap PCK is a minimal `project.godot` wrapper that enables .NET module initialization without game files.
-- The game's Sentry plugin has no `android.arm64` build, so it's disabled via PCK patching and Harmony patches.
-- GodotSharp interop is manually bootstrapped in `ModEntry.cs` since the Godot SDK source generators aren't available.
-
-## LAN Multiplayer
-
-Both devices must be on the same local network. The mobile app discovers nearby games via UDP broadcast, or you can enter the PC's IP address manually.
-
-On the PC, add `--fastmp` to the Steam launch options: **Steam > Slay the Spire 2 > Properties > Launch Options** → `--fastmp`. This enables the fast multiplayer mode the mobile client expects.
-
-Keep PC and mobile on the **same Steam branch** — cloud saves uploaded from one branch are not readable by a client on another, and Steam shows a generic sync conflict with no auto-recovery.
 
 ## License
 
-This project is licensed under the [MIT License](LICENSE). See [THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md) for third-party dependency licenses. FMOD requires a commercial license if your project generates revenue; Spine Runtimes require a valid Spine Editor license.
+[MIT License](LICENSE). Third-party licenses:
+[THIRD_PARTY_LICENSES.md](THIRD_PARTY_LICENSES.md). FMOD requires a
+commercial license if your project makes money; the Spine Runtimes require a
+Spine Editor license.

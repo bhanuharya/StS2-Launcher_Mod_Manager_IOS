@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!--
+    The perf build's add-on to the upstream launcher. It ships next to
+    STS2Mobile.dll in the APK's assets/dotnet_bcl and is loaded by
+    ModEntry.LoadPerfAddon() (injected by tools/LauncherPatcher).
+
+    It compiles against the launcher's own assemblies taken from the upstream
+    APK, so it needs no game files:
+
+      dotnet build -p:RefDir=<dir with STS2Mobile.dll, GodotSharp.dll, 0Harmony.dll> -p:PerfVersion=0.4.2.1
+  -->
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>STS2Perf</AssemblyName>
+    <RootNamespace>STS2Perf</RootNamespace>
+    <Nullable>disable</Nullable>
+    <LangVersion>latest</LangVersion>
+    <GenerateDependencyFile>false</GenerateDependencyFile>
+    <PerfVersion Condition=" '$(PerfVersion)' == '' ">0.0.0.0</PerfVersion>
+  </PropertyGroup>
+  <ItemGroup>
+    <AssemblyMetadata Include="PerfVersion" Value="$(PerfVersion)" />
+  </ItemGroup>
+  <ItemGroup>
+    <Reference Include="STS2Mobile">
+      <HintPath>$(RefDir)/STS2Mobile.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="GodotSharp">
+      <HintPath>$(RefDir)/GodotSharp.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+    <Reference Include="0Harmony">
+      <HintPath>$(RefDir)/0Harmony.dll</HintPath>
+      <Private>false</Private>
+    </Reference>
+  </ItemGroup>
+  <Target Name="CheckRefDir" BeforeTargets="ResolveAssemblyReferences">
+    <Error Condition="!Exists('$(RefDir)/STS2Mobile.dll')" Text="Set RefDir to a folder with the upstream APK's STS2Mobile.dll, GodotSharp.dll and 0Harmony.dll" />
+  </Target>
+</Project>

@@ -17,6 +17,12 @@ public partial class NGame : Node
         + "{\"filename\":\"a.png\",\"region\":{\"x\":0,\"y\":0,\"w\":32,\"h\":32}},"
         + "{\"filename\":\"b.png\",\"region\":{\"x\":32,\"y\":0,\"w\":64,\"h\":64}}]}]}";
 
+    // Like the real game's exported properties: an attribute argument whose
+    // enum type (PropertyHint) lives in GodotSharp.dll, which IlPatcher has
+    // to resolve while reading the assembly.
+    [Export(PropertyHint.Range, "0,10")]
+    public int ExportedValue { get; set; } = 1;
+
     private readonly System.Text.StringBuilder _report = new();
     private bool _ok = true;
 

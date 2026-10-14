@@ -3,15 +3,19 @@
 // there. The platform fixes they apply at runtime are applied here to the IL
 // instead, plus a call into Sts2IosSupport.dll (ios/support) at .NET startup.
 //
-// Usage: IlPatcher <sts2.dll> <Sts2IosSupport.dll> <output sts2.dll>
+// Usage: IlPatcher <sts2.dll> <Sts2IosSupport.dll> <output sts2.dll> [reference dir...]
+//
+// Reference dirs are only searched for assemblies the reader has to resolve,
+// e.g. GodotSharp.dll for enum arguments of [Export(PropertyHint...)]; the
+// game's own data_* folder works.
 
 using Mono.Cecil;
 using Mono.Cecil.Cil;
 using Mono.Cecil.Rocks;
 
-if (args.Length != 3)
+if (args.Length < 3)
 {
-    Console.Error.WriteLine("usage: IlPatcher <sts2.dll> <Sts2IosSupport.dll> <output.dll>");
+    Console.Error.WriteLine("usage: IlPatcher <sts2.dll> <Sts2IosSupport.dll> <output.dll> [reference dir...]");
     return 2;
 }
 
@@ -19,6 +23,8 @@ var (inputPath, supportPath, outputPath) = (args[0], args[1], args[2]);
 var resolver = new DefaultAssemblyResolver();
 resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(inputPath))!);
 resolver.AddSearchDirectory(Path.GetDirectoryName(Path.GetFullPath(supportPath))!);
+foreach (var dir in args.Skip(3))
+    resolver.AddSearchDirectory(Path.GetFullPath(dir));
 
 using var support = ModuleDefinition.ReadModule(supportPath, new ReaderParameters { AssemblyResolver = resolver });
 using var module = ModuleDefinition.ReadModule(

@@ -4,11 +4,10 @@ Goal: run your own copy of Slay the Spire 2 natively on an iPhone or iPad,
 built in the cloud on GitHub's macOS runners and sideloaded from Windows with
 a free Apple ID. Nothing in this repo contains game files.
 
-**Status:**
-- **Phase 0 (probe app):** ready to sideload.
-- **Phase 1 (the game):** the build pipeline is written and passes an
-  end-to-end rehearsal with a stand-in game (Linux, and macOS CI). It has not
-  run the real game on a device yet, so expect a few rounds of fixes.
+**Status:** the real game (v0.107.1) builds in CI and runs on an iPhone,
+sideloaded with Sideloadly. Known issues: occasional short freezes (the game
+stops for a moment, then carries on), no Steam features, saves copied by
+hand, and the PC-sized UI. See [Known limits](#known-limits).
 
 ## Why this isn't just the Android launcher recompiled
 
@@ -28,14 +27,20 @@ none of that works there:
 A free Apple ID signature lasts **7 days** and allows 3 sideloaded apps at
 once (and 10 new bundle IDs per week, so we keep the bundle IDs fixed).
 Re-run Sideloadly weekly to refresh it. Your saves survive a refresh, but
-**not** deleting the app. If you'd rather refresh from the phone itself,
-SideStore is an alternative. Its one-time setup needs a PC; after that it
-can refresh on-device.
+**not** deleting the app.
 
-## Phase 0: probe app (do this first)
+Sideloadly runs on Windows or macOS and signs in to Apple with Apple's own
+iTunes and iCloud software on that computer. SideStore and AltStore can
+refresh apps from the phone itself, but they sign in through public
+"anisette" servers instead, and in October 2026 Apple started rejecting
+those (error -80045 for everyone). Check their status before relying on
+them.
 
-`ios/probe` is a tiny Godot C# app. It confirms that sideloading works on your
-phone and reports what the port depends on. The most important line is whether
+## Probe app (optional device check)
+
+`ios/probe` is a tiny Godot C# app. It was the first step of the port, before
+the game itself ran; you can skip it now. It confirms that sideloading works on
+your phone and reports what the port depends on. The most important line is whether
 your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 
 1. Open **Actions → "iOS probe (phase 0)"** in this repo and select the latest green run.
@@ -52,13 +57,26 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 7. Send back the report. Either take a screenshot, or open
    **Files → On My iPhone → StS2 iOS Probe → probe_report.txt**.
 
+**If the probe closes by itself** (for example right after the Godot splash),
+send these instead:
+
+- From **Files → On My iPhone → StS2 iOS Probe**: `probe_progress.txt` (its
+  last line is the step it died on), `probe_report.txt` if it exists, and
+  `logs/godot.log`. If the folder isn't there, the app died before Godot could
+  write anything.
+- The crash report: **Settings → Privacy & Security → Analytics &
+  Improvements → Analytics Data**, open the newest entry starting with
+  `StS2Probe`, and share it.
+
 ## Phase 1: the game
 
 ### One-time setup
 
 1. **Enable Actions on this fork.** Open the **Actions** tab. If GitHub asks,
    click *"I understand my workflows, go ahead and enable them"*.
-2. **Add three repository secrets** under **Settings → Secrets and variables →
+2. **Turn on Issues** under **Settings → General → Features → Issues**. The
+   build asks you for your Steam Guard code in an issue (see *Build*).
+3. **Add three repository secrets** under **Settings → Secrets and variables →
    Actions → New repository secret**:
 
    | Name | Value |
@@ -69,8 +87,6 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 
    Secrets are encrypted, are never shown in logs, and aren't given to pull
    requests from other people's forks. Only workflows you start can use them.
-3. **Steam Guard mobile authenticator.** You approve each build's sign-in in
-   the Steam mobile app. Email-code Steam Guard can't work in CI.
 4. **Install the game on your PC through Steam** (same branch you build
    for). You'll copy its `SlayTheSpire2.pck` to the phone.
 
@@ -79,10 +95,32 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 1. **Actions → "iOS game build" → Run workflow.** Pick branch
    `main`, source `steam`, and Steam branch `public`
    (or the beta you play).
-2. When the **Download game from Steam** step starts, open the Steam app on
-   your phone and **approve the sign-in**.
+2. About a minute later, GitHub notifies you of a new issue, **"Steam Guard
+   code for iOS build #N"**, that mentions you. Open the **Steam app →
+   Steam Guard** (shield icon) and reply to the issue with the 5-character
+   code. Send it right after the code changes; codes last 30 seconds. The
+   build reads only your replies, deletes each one after reading it, and
+   closes the issue once it's signed in. It waits 15 minutes for a code.
+
+   After you reply, the Steam app may pop up a sign-in request from the
+   build machine. **Don't approve it.** GitHub's build machines are in the
+   US/UK, and Steam blocks approving a sign-in from that far away ("Steam
+   has blocked this sign in"). Your code already signs the build in. No
+   Steam Guard in the Steam app? Reply `email`, and then reply with the code
+   Steam e-mails you.
 3. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
    (kept for 3 days).
+
+**Skip the code with a saved login (optional, needs a PC).** On Windows or
+Linux, download **SteamFetch-win-x64** or **SteamFetch-linux-x64** from the
+latest **Actions → "SteamFetch"** run, and run `SteamFetch login` (or
+`dotnet run --project ios/tools/SteamFetch -- login` with the .NET SDK).
+Sign in, approve in the Steam app (it's on your network, so Steam allows
+it), and add the refresh token it prints as the `STEAM_REFRESH_TOKEN`
+secret. Builds then sign in without a code. The token works like your
+password and lasts for months. To revoke it, use **Steam → Settings →
+Security → Manage Steam Guard → Remove all authorized devices**, or change
+your password.
 
 ### Install
 
@@ -91,12 +129,35 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 2. Sideload `StS2.ipa` with Sideloadly, the same way as the probe. The app
    shows up as **StS2**.
 3. Copy the game data: on the PC, go to **Steam → Slay the Spire 2 → Manage →
-   Browse local files** and find `SlayTheSpire2.pck` (about 2 GB). Then copy
-   it to the phone:
+   Browse local files** and find `SlayTheSpire2.pck` (about 2 GB). It goes
+   directly into the app's folder, which the Files app shows as **On My
+   iPhone → StS2**:
    - **Windows 11:** in the **Apple Devices** app, select your iPhone → **Files** → **StS2** → drag the `.pck` in.
    - **Windows 10:** in **iTunes**, select your iPhone → **File Sharing** → **StS2** → **Add File**.
+   - **From the phone:** if the file is already in iCloud Drive, Google
+     Drive or on a USB drive, long-press it in the Files app → **Move** →
+     **On My iPhone → StS2**.
 4. Open **StS2**. If the file is missing or from a different game version than
    the build, the app says so instead of starting.
+
+### Saves
+
+The iOS build has no Steam Cloud, so it starts with empty saves. To continue
+your PC progress, close the game on both sides and copy the profile folders
+across:
+
+- **PC:** `%APPDATA%\SlayTheSpire2\steam\<your Steam ID>\` holds
+  `profile1`–`profile3`, each with a `saves` folder.
+- **iPhone:** the game creates its own profile folders inside **Files → On
+  My iPhone → StS2** on first start. Copy the PC's profile folders over the
+  matching ones there, with iTunes File Sharing / Apple Devices or the Files
+  app.
+
+Progress made on the phone doesn't go back to Steam by itself. Copy the
+folders back before playing on the PC or Android again, or you'll continue
+from the older save there. The Android launcher's local backups
+(`StS2LauncherMM/Saves` on the device) use the same `steam/<id>/profileN`
+layout.
 
 ### Updates
 
@@ -124,26 +185,56 @@ deleting the app.
   format (planned, only if needed).
 - **First-run hitches:** Godot compiles each graphics pipeline the first time
   an effect appears and caches it, so the first fights may stutter briefly.
+- **Short freezes seen on device:** the game sometimes stops for a moment and
+  then carries on. Not yet known whether these are first-use pipeline
+  compiles, texture loads, or .NET garbage collection; a frame-time log
+  like the Android perf build's would tell them apart.
 
-## Phase 2: playability
+## Future improvements
 
-Port the most important mobile fixes from the Android patches as IL patches:
-UI scale for phone screens, touch-friendly hover/tooltips, and app
-suspend/resume handling.
+Planned, roughly in this order; none are built yet.
+
+1. **Short freezes.** `support/FrameWatch.cs` logs each frame over 100 ms
+   with what changed during it (pipelines compiled per kind, texture memory,
+   resources, GC collections and pause). Fix whichever cause shows up.
+2. **Steam login and Steam Cloud saves in the app.** Port the Android
+   launcher's SteamKit2 login and Save Manager (`src/STS2Mobile/Steam`). On
+   Android they're hooked in at runtime with Harmony; here the hooks have to
+   be IL patches at build time, like the existing ones. First check that
+   SteamKit2 (protobuf serialization, reflection) works under NativeAOT, for
+   example with SteamFetch published with `PublishAot`. Logging in from the
+   phone also avoids Steam's location block on the build machine.
+3. **In-app `.pck` download** through the same SteamKit2 depot code the
+   Android launcher uses, so the PC isn't needed for game data.
+4. **Automatic builds on game updates.** A scheduled workflow uses
+   `STEAM_REFRESH_TOKEN` to compare the Steam build ID (PICS) with the last
+   build's, and builds a new IPA when it changes. Updating is then one
+   Sideloadly install.
+5. **Playability.** Port the most important mobile fixes from the Android
+   patches as IL patches: UI scale for phone screens, touch-friendly
+   hover/tooltips, and app suspend/resume handling.
+6. **Achievements** through SteamKit2's user stats, if worth it.
+
+Not possible on iOS: game updates or mods without a rebuild (no loading of
+new code; a Godot build with a .NET interpreter could do it, but it's a large
+engine project and much slower), Steam lobbies and P2P networking, and the
+Steam overlay.
 
 ## Known limits
 
+- Occasional short freezes (see [Performance](#performance)).
 - No Steam online features (achievements, cloud saves, Steam lobbies).
-  Direct-IP / LAN multiplayer may work.
+  Saves are copied by hand (see [Saves](#saves)). Direct-IP / LAN
+  multiplayer may work.
 - No mods (see above).
-- iPhone screen size: the PC UI is small on a 6.3" display until phase 2.
+- iPhone screen size: the PC UI is small on a 6.3" display (see [Future improvements](#future-improvements)).
 - Godot's iOS C# support is marked experimental upstream.
 
 ## How the build works (for developers)
 
 ```
 Steam (your account) ──► data_*/sts2.dll + deps, SlayTheSpire2.pck (CI only)
-        │
+        │                       tools/SteamFetch (+ steam_guard_code.py for the Steam Guard code)
         ├─ tools/select_assemblies.py   game's own managed DLLs, no .NET runtime
         ├─ tools/IlPatcher              skip Steam/Sentry init, call Sts2Ios.Hooks
         ├─ support/Sts2IosSupport       Steam stub resolver, AOT-safe atlas JSON, diagnostics

@@ -32,6 +32,7 @@ public static class Hooks
     private static void OnFirstFrame()
     {
         Run("diagnostics", Diagnostics.Log);
+        Run("frame watch", FrameWatch.Start);
     }
 
     public static void Note(string message) => GD.Print($"{Tag} {message}");

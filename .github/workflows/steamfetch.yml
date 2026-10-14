@@ -1,0 +1,41 @@
+name: SteamFetch
+
+# Builds ios/tools/SteamFetch as a single program for Windows and Linux, so
+# you can run `SteamFetch login` on your own PC without installing .NET and
+# store the result as the STEAM_REFRESH_TOKEN secret. See ios/README.md.
+# No secrets and no game content.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "ios/tools/SteamFetch/**"
+      - ".github/workflows/steamfetch.yml"
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        rid: [win-x64, linux-x64]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "9.0.x"
+
+      - name: Publish
+        run: |
+          dotnet publish ios/tools/SteamFetch -c Release -r "${{ matrix.rid }}" --self-contained \
+            -p:PublishSingleFile=true -p:IncludeNativeLibrariesForSelfExtract=true \
+            -p:EnableCompressionInSingleFile=true -p:DebugType=none -o out
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: SteamFetch-${{ matrix.rid }}
+          path: out/
+          if-no-files-found: error
