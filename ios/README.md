@@ -4,11 +4,10 @@ Goal: run your own copy of Slay the Spire 2 natively on an iPhone or iPad,
 built in the cloud on GitHub's macOS runners and sideloaded from Windows with
 a free Apple ID. Nothing in this repo contains game files.
 
-**Status:**
-- **Phase 0 (probe app):** ready to sideload.
-- **Phase 1 (the game):** the build pipeline is written and passes an
-  end-to-end rehearsal with a stand-in game (Linux, and macOS CI). It has not
-  run the real game on a device yet, so expect a few rounds of fixes.
+**Status:** the real game (v0.107.1) builds in CI and runs on an iPhone,
+sideloaded with Sideloadly. Known issues: occasional short freezes (the game
+stops for a moment, then carries on), no Steam features, saves copied by
+hand, and the PC-sized UI. See [Known limits](#known-limits).
 
 ## Why this isn't just the Android launcher recompiled
 
@@ -28,14 +27,20 @@ none of that works there:
 A free Apple ID signature lasts **7 days** and allows 3 sideloaded apps at
 once (and 10 new bundle IDs per week, so we keep the bundle IDs fixed).
 Re-run Sideloadly weekly to refresh it. Your saves survive a refresh, but
-**not** deleting the app. If you'd rather refresh from the phone itself,
-SideStore is an alternative. Its one-time setup needs a PC; after that it
-can refresh on-device.
+**not** deleting the app.
 
-## Phase 0: probe app (do this first)
+Sideloadly runs on Windows or macOS and signs in to Apple with Apple's own
+iTunes and iCloud software on that computer. SideStore and AltStore can
+refresh apps from the phone itself, but they sign in through public
+"anisette" servers instead, and in October 2026 Apple started rejecting
+those (error -80045 for everyone). Check their status before relying on
+them.
 
-`ios/probe` is a tiny Godot C# app. It confirms that sideloading works on your
-phone and reports what the port depends on. The most important line is whether
+## Probe app (optional device check)
+
+`ios/probe` is a tiny Godot C# app. It was the first step of the port, before
+the game itself ran; you can skip it now. It confirms that sideloading works on
+your phone and reports what the port depends on. The most important line is whether
 your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 
 1. Open **Actions → "iOS probe (phase 0)"** in this repo and select the latest green run.
@@ -124,12 +129,35 @@ your password.
 2. Sideload `StS2.ipa` with Sideloadly, the same way as the probe. The app
    shows up as **StS2**.
 3. Copy the game data: on the PC, go to **Steam → Slay the Spire 2 → Manage →
-   Browse local files** and find `SlayTheSpire2.pck` (about 2 GB). Then copy
-   it to the phone:
+   Browse local files** and find `SlayTheSpire2.pck` (about 2 GB). It goes
+   directly into the app's folder, which the Files app shows as **On My
+   iPhone → StS2**:
    - **Windows 11:** in the **Apple Devices** app, select your iPhone → **Files** → **StS2** → drag the `.pck` in.
    - **Windows 10:** in **iTunes**, select your iPhone → **File Sharing** → **StS2** → **Add File**.
+   - **From the phone:** if the file is already in iCloud Drive, Google
+     Drive or on a USB drive, long-press it in the Files app → **Move** →
+     **On My iPhone → StS2**.
 4. Open **StS2**. If the file is missing or from a different game version than
    the build, the app says so instead of starting.
+
+### Saves
+
+The iOS build has no Steam Cloud, so it starts with empty saves. To continue
+your PC progress, close the game on both sides and copy the profile folders
+across:
+
+- **PC:** `%APPDATA%\SlayTheSpire2\steam\<your Steam ID>\` holds
+  `profile1`–`profile3`, each with a `saves` folder.
+- **iPhone:** the game creates its own profile folders inside **Files → On
+  My iPhone → StS2** on first start. Copy the PC's profile folders over the
+  matching ones there, with iTunes File Sharing / Apple Devices or the Files
+  app.
+
+Progress made on the phone doesn't go back to Steam by itself. Copy the
+folders back before playing on the PC or Android again, or you'll continue
+from the older save there. The Android launcher's local backups
+(`StS2LauncherMM/Saves` on the device) use the same `steam/<id>/profileN`
+layout.
 
 ### Updates
 
@@ -157,6 +185,10 @@ deleting the app.
   format (planned, only if needed).
 - **First-run hitches:** Godot compiles each graphics pipeline the first time
   an effect appears and caches it, so the first fights may stutter briefly.
+- **Short freezes seen on device:** the game sometimes stops for a moment and
+  then carries on. Not yet known whether these are first-use pipeline
+  compiles, texture loads, or .NET garbage collection; a frame-time log
+  like the Android perf build's would tell them apart.
 
 ## Phase 2: playability
 
@@ -166,8 +198,10 @@ suspend/resume handling.
 
 ## Known limits
 
+- Occasional short freezes (see [Performance](#performance)).
 - No Steam online features (achievements, cloud saves, Steam lobbies).
-  Direct-IP / LAN multiplayer may work.
+  Saves are copied by hand (see [Saves](#saves)). Direct-IP / LAN
+  multiplayer may work.
 - No mods (see above).
 - iPhone screen size: the PC UI is small on a 6.3" display until phase 2.
 - Godot's iOS C# support is marked experimental upstream.
