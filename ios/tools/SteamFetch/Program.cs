@@ -1,22 +1,28 @@
-// SteamFetch: downloads selected files of a Steam app with a saved login, so
-// the iOS CI build doesn't need a fresh sign-in approval each run. Steam
-// refuses to approve sign-ins from GitHub's runners (they're in another
-// country from the account), but a refresh token made on your own PC works
-// from anywhere.
+// SteamFetch: downloads selected files of a Steam app on a build machine.
 //
-//   SteamFetch login
-//       Interactive. Signs in (approve in the Steam mobile app or type the
-//       code) and prints the account name and refresh token. Run it on your
-//       own PC and store the token as the STEAM_REFRESH_TOKEN secret.
+// Steam blocks approving a sign-in in the Steam mobile app when the build
+// machine is far from the account's usual location (GitHub's runners are in
+// the US/UK). Two ways around that:
 //
-//   SteamFetch download --user NAME --app ID --dir OUT --filelist FILE [--branch public]
-//       Token from the STEAM_REFRESH_TOKEN environment variable. FILE lists
-//       depot paths, one per line; "regex:<pattern>" lines match by regex.
-//       Downloads the matching files of the app's Windows 64-bit depots.
+//   SteamFetch login [--code]
+//       Interactive, on your own PC. Signs in (approve in the Steam app, or
+//       with --code type the Steam Guard code) and prints the account name
+//       and a refresh token. Store the token as the STEAM_REFRESH_TOKEN
+//       secret and builds sign in with it, with no code or approval.
+//
+//   SteamFetch download --user NAME --app ID --dir OUT --filelist FILE
+//                       [--branch public] [--code-command PROGRAM]
+//       Signs in with STEAM_REFRESH_TOKEN if set, else with STEAM_PASSWORD
+//       and a Steam Guard code. The code comes from PROGRAM (run as
+//       `PROGRAM <device|email:ADDRESS> <first|retry>`, prints the code), or
+//       from the console without it. FILE lists depot paths, one per line;
+//       "regex:<pattern>" lines match by regex. Downloads the matching files
+//       of the app's Windows 64-bit depots.
 //
 // The depot logic follows the Android launcher's src/STS2Mobile/Steam/DepotDownloader.cs.
 
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Security.Cryptography;
 using System.Text.RegularExpressions;
@@ -33,7 +39,7 @@ static class SteamFetchProgram
         try
         {
             if (args.Length >= 1 && args[0] == "login")
-                return await Login();
+                return await Login(useCode: args.Contains("--code"));
             if (args.Length >= 1 && args[0] == "download")
                 return await Download(ParseOptions(args.Skip(1).ToArray()));
         }
@@ -43,8 +49,9 @@ static class SteamFetchProgram
             return 1;
         }
         Console.Error.WriteLine(
-            "usage: SteamFetch login\n"
-                + "       SteamFetch download --user NAME --app ID --dir OUT --filelist FILE [--branch public]"
+            "usage: SteamFetch login [--code]\n"
+                + "       SteamFetch download --user NAME --app ID --dir OUT --filelist FILE [--branch public]\n"
+                + "                           [--code-command PROGRAM]"
         );
         return 2;
     }
@@ -57,7 +64,7 @@ static class SteamFetchProgram
         return options;
     }
 
-    private static async Task<int> Login()
+    private static async Task<int> Login(bool useCode)
     {
         Console.Write("Steam account name: ");
         var user = Console.ReadLine()?.Trim() ?? "";
@@ -72,7 +79,7 @@ static class SteamFetchProgram
                 Password = password,
                 IsPersistentSession = true,
                 DeviceFriendlyName = "StS2 iOS build (SteamFetch)",
-                Authenticator = new UserConsoleAuthenticator(),
+                Authenticator = useCode ? new CodeAuthenticator(PromptForCode) : new UserConsoleAuthenticator(),
             }
         );
         var result = await auth.PollingWaitForResultAsync();
@@ -87,6 +94,18 @@ static class SteamFetchProgram
         Console.WriteLine($"to {result.AccountName}. It stays valid for months; run this again if Steam");
         Console.WriteLine("rejects it later.");
         return 0;
+    }
+
+    private static Task<string> PromptForCode(string kind, bool retry)
+    {
+        if (retry)
+            Console.WriteLine("That code was wrong or expired.");
+        Console.Write(
+            kind.StartsWith("email:")
+                ? $"Code Steam e-mailed to {kind[6..]}: "
+                : "Steam Guard code (Steam app > Steam Guard): "
+        );
+        return Task.FromResult(Console.ReadLine()?.Trim() ?? "");
     }
 
     private static string ReadHidden()
@@ -117,13 +136,34 @@ static class SteamFetchProgram
         var appId = uint.Parse(o.GetValueOrDefault("app") ?? throw new ArgumentException("--app is required"));
         var dir = o.GetValueOrDefault("dir") ?? throw new ArgumentException("--dir is required");
         var branch = o.GetValueOrDefault("branch") ?? "public";
-        var token = Environment.GetEnvironmentVariable("STEAM_REFRESH_TOKEN");
-        if (string.IsNullOrWhiteSpace(token))
-            throw new ArgumentException("set STEAM_REFRESH_TOKEN");
+        var token = Environment.GetEnvironmentVariable("STEAM_REFRESH_TOKEN")?.Trim();
+        var password = Environment.GetEnvironmentVariable("STEAM_PASSWORD");
+        if (string.IsNullOrEmpty(token) && string.IsNullOrEmpty(password))
+            throw new ArgumentException("set STEAM_REFRESH_TOKEN, or STEAM_PASSWORD");
         var filter = FileFilter.Load(o.GetValueOrDefault("filelist") ?? throw new ArgumentException("--filelist is required"));
 
         await using var session = await SteamSession.ConnectAsync();
-        await session.LogOnAsync(user, token.Trim());
+        if (string.IsNullOrEmpty(token))
+        {
+            var codeCommand = o.GetValueOrDefault("code-command");
+            Func<string, bool, Task<string>> getCode = codeCommand != null
+                ? (kind, retry) => RunCodeCommand(codeCommand, kind, retry)
+                : PromptForCode;
+            var auth = await session.Client.Authentication.BeginAuthSessionViaCredentialsAsync(
+                new AuthSessionDetails
+                {
+                    Username = user,
+                    Password = password,
+                    IsPersistentSession = false,
+                    DeviceFriendlyName = "StS2 iOS build (SteamFetch)",
+                    Authenticator = new CodeAuthenticator(getCode),
+                }
+            );
+            var result = await auth.PollingWaitForResultAsync();
+            token = result.RefreshToken;
+            user = result.AccountName;
+        }
+        await session.LogOnAsync(user, token);
         Console.WriteLine($"Logged in as {user}");
 
         var downloader = new DepotFetcher(session, appId, branch, dir, filter);
@@ -131,6 +171,39 @@ static class SteamFetchProgram
         Console.WriteLine($"Downloaded {count} files to {dir}");
         return count > 0 ? 0 : 1;
     }
+
+    // Runs PROGRAM <kind> <first|retry>; its standard output is the code. Its
+    // standard error goes to our log.
+    private static async Task<string> RunCodeCommand(string program, string kind, bool retry)
+    {
+        var psi = new ProcessStartInfo(program) { RedirectStandardOutput = true, UseShellExecute = false };
+        psi.ArgumentList.Add(kind);
+        psi.ArgumentList.Add(retry ? "retry" : "first");
+        using var process = Process.Start(psi) ?? throw new InvalidOperationException($"can't run {program}");
+        var output = await process.StandardOutput.ReadToEndAsync();
+        await process.WaitForExitAsync();
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException($"no Steam Guard code ({program} exited with {process.ExitCode})");
+        return output.Trim();
+    }
+}
+
+// Signs in with a Steam Guard code (from the Steam app or e-mail) instead of
+// waiting for approval in the Steam app, which Steam refuses for sign-ins far
+// from the account's usual location.
+sealed class CodeAuthenticator : IAuthenticator
+{
+    private readonly Func<string, bool, Task<string>> _getCode;
+
+    public CodeAuthenticator(Func<string, bool, Task<string>> getCode) => _getCode = getCode;
+
+    public Task<bool> AcceptDeviceConfirmationAsync() => Task.FromResult(false);
+
+    public Task<string> GetDeviceCodeAsync(bool previousCodeWasIncorrect) =>
+        _getCode("device", previousCodeWasIncorrect);
+
+    public Task<string> GetEmailCodeAsync(string email, bool previousCodeWasIncorrect) =>
+        _getCode("email:" + email, previousCodeWasIncorrect);
 }
 
 // A connected SteamClient with its callback loop running on a background thread.

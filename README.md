@@ -30,7 +30,7 @@ Runs your own Steam copy of the game natively on iOS. **Status:** the build pipe
 
 The Android launcher can't be reused as-is on iOS, because iOS forbids the JIT compiler that Harmony and runtime DLL loading need. So the iOS port works differently:
 
-- **Ahead-of-time compiled.** A GitHub macOS runner logs into Steam with your account (you approve the sign-in in the Steam mobile app). It downloads the game's assemblies, applies the platform patches to `sts2.dll` at build time with Mono.Cecil, and compiles everything to native ARM64 code with .NET NativeAOT. This is also the fastest way to run the game's code on iOS.
+- **Ahead-of-time compiled.** A GitHub macOS runner logs into Steam with your account (you reply to an issue with your Steam Guard code). It downloads the game's assemblies, applies the platform patches to `sts2.dll` at build time with Mono.Cecil, and compiles everything to native ARM64 code with .NET NativeAOT. This is also the fastest way to run the game's code on iOS.
 - **Your game data, not ours.** The app doesn't contain `SlayTheSpire2.pck`. You copy it from your PC's Steam folder into the app's folder, and the app checks that it matches the build.
 - **Private build output.** This repo is public and the app contains compiled game code, so the build is only uploaded inside a zip encrypted with a password you set.
 - **No mods** on iOS, and no Steam online features.
@@ -39,7 +39,7 @@ Quick start:
 
 1. Sideload the probe app from **Actions → "iOS probe (phase 0)"** to check that sideloading works on your device. Its report shows whether the GPU reads the PC game's textures natively.
 2. Add the `STEAM_USERNAME`, `STEAM_PASSWORD`, and `IPA_PASSWORD` repository secrets.
-3. Run **Actions → "iOS game build"** with source `steam` and approve the Steam sign-in on your phone.
+3. Run **Actions → "iOS game build"** with source `steam`, and reply to the issue it opens with your Steam Guard code.
 4. Unzip the artifact with 7-Zip, sideload `StS2.ipa` with Sideloadly, copy `SlayTheSpire2.pck` into the app's folder, and play.
 
 Full guide, troubleshooting, and how the build works: **[ios/README.md](ios/README.md)**.

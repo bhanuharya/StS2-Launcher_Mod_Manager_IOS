@@ -30,7 +30,7 @@
 
 iOS 는 Harmony 패칭과 런타임 DLL 로딩에 필요한 JIT 를 허용하지 않기 때문에, 안드로이드 런처를 그대로 쓸 수 없습니다. 그래서 iOS 포트는 다음과 같이 동작합니다.
 
-- **사전(AOT) 컴파일.** GitHub macOS 러너가 본인 계정으로 Steam 에 로그인합니다(로그인 승인은 Steam 모바일 앱에서). 게임 어셈블리를 받아 Mono.Cecil 로 `sts2.dll` 에 플랫폼 패치를 빌드 시점에 적용하고, .NET NativeAOT 로 ARM64 네이티브 코드로 컴파일합니다. iOS 에서 게임 코드를 가장 빠르게 실행하는 방법이기도 합니다.
+- **사전(AOT) 컴파일.** GitHub macOS 러너가 본인 계정으로 Steam 에 로그인합니다(빌드가 여는 이슈에 Steam Guard 코드를 답글로 보냅니다). 게임 어셈블리를 받아 Mono.Cecil 로 `sts2.dll` 에 플랫폼 패치를 빌드 시점에 적용하고, .NET NativeAOT 로 ARM64 네이티브 코드로 컴파일합니다. iOS 에서 게임 코드를 가장 빠르게 실행하는 방법이기도 합니다.
 - **게임 데이터는 본인 것.** 앱에는 `SlayTheSpire2.pck` 가 들어 있지 않습니다. PC 의 Steam 폴더에서 앱 폴더로 직접 복사하며, 앱이 빌드와 버전이 맞는지 확인합니다.
 - **빌드 결과물은 비공개.** 이 저장소는 공개 저장소이고 앱에는 컴파일된 게임 코드가 들어 있으므로, 결과물은 본인이 정한 비밀번호로 암호화된 zip 으로만 업로드됩니다.
 - iOS 에서는 **모드를 쓸 수 없고**, Steam 온라인 기능도 지원하지 않습니다.
@@ -39,7 +39,7 @@ iOS 는 Harmony 패칭과 런타임 DLL 로딩에 필요한 JIT 를 허용하지
 
 1. **Actions → "iOS probe (phase 0)"** 의 프로브 앱을 사이드로드해, 기기에서 사이드로드가 되는지 확인합니다. 리포트에 GPU 가 PC 판 텍스처를 그대로 읽을 수 있는지도 표시됩니다.
 2. 저장소 시크릿 `STEAM_USERNAME`, `STEAM_PASSWORD`, `IPA_PASSWORD` 를 추가합니다.
-3. **Actions → "iOS game build"** 를 source `steam` 으로 실행하고, 폰의 Steam 앱에서 로그인을 승인합니다.
+3. **Actions → "iOS game build"** 를 source `steam` 으로 실행하고, 빌드가 여는 이슈에 Steam 앱의 Steam Guard 코드를 답글로 보냅니다.
 4. 결과물을 7-Zip 으로 풀고, `StS2.ipa` 를 Sideloadly 로 설치한 뒤, `SlayTheSpire2.pck` 를 앱 폴더에 복사하면 플레이할 수 있습니다.
 
 전체 가이드, 문제 해결, 빌드 구조 (영문): **[ios/README.md](ios/README.md)**

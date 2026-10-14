@@ -5,10 +5,11 @@ name: iOS game build
 # See ios/README.md.
 #
 # Actions > "iOS game build" > Run workflow, source = steam:
-#   logs into Steam as STEAM_USERNAME with the STEAM_REFRESH_TOKEN secret (a
-#   saved login made on your own PC with ios/tools/SteamFetch; no approval
-#   needed), or else with STEAM_PASSWORD, approving the sign-in in the Steam
-#   mobile app while "Download game from Steam" runs.
+#   logs into Steam as STEAM_USERNAME with STEAM_PASSWORD and a Steam Guard
+#   code: the run opens an issue that @mentions you, and you reply with the
+#   code from the Steam app. (Steam blocks approving the sign-in in the app,
+#   because GitHub's runners are far from you.) With a STEAM_REFRESH_TOKEN
+#   secret from `SteamFetch login` (ios/tools/SteamFetch) it needs neither.
 #   The .ipa holds compiled game code and this repo is public, so it is only
 #   uploaded inside a zip encrypted with the IPA_PASSWORD secret.
 #
@@ -37,6 +38,8 @@ on:
 
 permissions:
   contents: read
+  # Steam Guard code requests (ios/tools/steam_guard_code.py).
+  issues: write
 
 concurrency:
   group: ios-game-${{ github.ref }}-${{ github.event_name }}
@@ -45,7 +48,6 @@ concurrency:
 env:
   GODOT_VERSION: "4.5.1"
   GODOT_BASE_URL: https://github.com/godotengine/godot/releases/download/4.5.1-stable
-  DEPOTDOWNLOADER_URL: https://github.com/SteamRE/DepotDownloader/releases/download/DepotDownloader_3.4.0/DepotDownloader-macos-arm64.zip
   STS2_APP_ID: "2868840"
   SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source || 'fake' }}
 
@@ -64,7 +66,7 @@ jobs:
         run: |
           missing=""
           [ -n "$STEAM_USERNAME" ] || missing="$missing STEAM_USERNAME"
-          [ -n "$STEAM_REFRESH_TOKEN$STEAM_PASSWORD" ] || missing="$missing STEAM_REFRESH_TOKEN"
+          [ -n "$STEAM_REFRESH_TOKEN$STEAM_PASSWORD" ] || missing="$missing STEAM_PASSWORD"
           [ -n "$IPA_PASSWORD" ] || missing="$missing IPA_PASSWORD"
           if [ -n "$missing" ]; then
             echo "::error::Add these repository secrets (Settings > Secrets and variables > Actions):$missing"
@@ -76,6 +78,44 @@ jobs:
       - uses: actions/setup-dotnet@v4
         with:
           dotnet-version: "9.0.x"
+
+      # First, so the Steam Guard code request comes right after you start the run.
+      - name: Download game from Steam
+        id: steam
+        if: env.SOURCE == 'steam'
+        timeout-minutes: 30
+        env:
+          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
+          STEAM_REFRESH_TOKEN: ${{ secrets.STEAM_REFRESH_TOKEN }}
+          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
+          STEAM_BRANCH: ${{ inputs.steam_branch }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GUARD_USER: ${{ github.triggering_actor }}
+        run: |
+          # Only what the build needs: the assemblies, the pck (for its project
+          # settings; it is not uploaded), and release_info.json.
+          printf '%s\n' 'regex:^data_[^/]+/[^/]+\.dll$' 'regex:^[^/]+\.pck$' 'release_info.json' > "$RUNNER_TEMP/files.txt"
+          dotnet build ios/tools/SteamFetch -c Release -o "$RUNNER_TEMP/steamfetch" -v quiet -nologo
+          # Without a saved login, Steam asks for a Steam Guard code, which
+          # steam_guard_code.py gets from you through an issue.
+          dotnet "$RUNNER_TEMP/steamfetch/SteamFetch.dll" download \
+            --user "$STEAM_USERNAME" --app "$STS2_APP_ID" --branch "${STEAM_BRANCH:-public}" \
+            --filelist "$RUNNER_TEMP/files.txt" --dir "$HOME/game" \
+            --code-command "$PWD/ios/tools/steam_guard_code.py" < /dev/null
+          ls -la "$HOME/game"
+          if [ ! -f "$HOME/game/SlayTheSpire2.pck" ]; then
+            echo "::error::SlayTheSpire2.pck was not downloaded (wrong branch, or the account doesn't own the game?)"
+            exit 1
+          fi
+
+      - name: Close the Steam Guard issue
+        if: always() && env.SOURCE == 'steam'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OUTCOME: ${{ steps.steam.outcome }}
+        run: |
+          if [ "$OUTCOME" = success ]; then note="Signed in and downloaded. The build continues."; else note="The Steam step failed; see the run log."; fi
+          ios/tools/steam_guard_code.py --close "$note"
 
       - name: Cache Godot editor + iOS template
         id: godot-cache
@@ -105,40 +145,6 @@ jobs:
         with:
           path: ~/ext-cache
           key: gdext-fmod-6.1.0-4.5.0-spine-4.2-4.5.1-v1
-
-      - name: Download game from Steam
-        if: env.SOURCE == 'steam'
-        timeout-minutes: 20
-        env:
-          STEAM_USERNAME: ${{ secrets.STEAM_USERNAME }}
-          STEAM_REFRESH_TOKEN: ${{ secrets.STEAM_REFRESH_TOKEN }}
-          STEAM_PASSWORD: ${{ secrets.STEAM_PASSWORD }}
-          STEAM_BRANCH: ${{ inputs.steam_branch }}
-        run: |
-          # Only what the build needs: the assemblies, the pck (for its project
-          # settings; it is not uploaded), and release_info.json.
-          printf '%s\n' 'regex:^data_[^/]+/[^/]+\.dll$' 'regex:^[^/]+\.pck$' 'release_info.json' > "$RUNNER_TEMP/files.txt"
-          if [ -n "$STEAM_REFRESH_TOKEN" ]; then
-            # Saved login from `SteamFetch login`: works from the runner's
-            # location without a new approval.
-            dotnet run --project ios/tools/SteamFetch -c Release -- download \
-              --user "$STEAM_USERNAME" --app "$STS2_APP_ID" --branch "${STEAM_BRANCH:-public}" \
-              --filelist "$RUNNER_TEMP/files.txt" --dir "$HOME/game" < /dev/null
-          else
-            curl -fsSL -o "$RUNNER_TEMP/dd.zip" "$DEPOTDOWNLOADER_URL"
-            mkdir -p ~/depotdownloader
-            unzip -q -o "$RUNNER_TEMP/dd.zip" -d ~/depotdownloader
-            chmod +x ~/depotdownloader/DepotDownloader
-            echo "::notice::Approve the Steam sign-in in your Steam mobile app now. This step waits for it. If Steam blocks sign-ins from the runner's location, use STEAM_REFRESH_TOKEN instead (ios/README.md)."
-            ~/depotdownloader/DepotDownloader -app "$STS2_APP_ID" -os windows -osarch 64 \
-              -branch "${STEAM_BRANCH:-public}" -username "$STEAM_USERNAME" -password "$STEAM_PASSWORD" \
-              -filelist "$RUNNER_TEMP/files.txt" -dir "$HOME/game" -max-downloads 16 < /dev/null
-          fi
-          ls -la "$HOME/game"
-          if [ ! -f "$HOME/game/SlayTheSpire2.pck" ]; then
-            echo "::error::SlayTheSpire2.pck was not downloaded (wrong branch, or the account doesn't own the game?)"
-            exit 1
-          fi
 
       - name: Build the fake game
         if: env.SOURCE == 'fake'

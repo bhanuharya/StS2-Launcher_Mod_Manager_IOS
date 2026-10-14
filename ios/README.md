@@ -69,43 +69,19 @@ send these instead:
 
 1. **Enable Actions on this fork.** Open the **Actions** tab. If GitHub asks,
    click *"I understand my workflows, go ahead and enable them"*.
-2. **Save a Steam login on your PC.** Steam won't let you approve a sign-in
-   from GitHub's build machines (they're in another country), so you sign in
-   once on your own PC and give the build the saved login instead of your
-   password:
-   1. Open **Actions → "SteamFetch"**, select the latest green run, and
-      download **SteamFetch-win-x64** (or **SteamFetch-linux-x64** for WSL or
-      Linux). Unzip it.
-   2. In a terminal in that folder, run `.\SteamFetch.exe login` (Windows) or
-      `chmod +x SteamFetch && ./SteamFetch login` (Linux/WSL). If Windows
-      SmartScreen warns about it, click *More info → Run anyway*.
-   3. Type your account name and password, then approve the sign-in in the
-      Steam mobile app (or type the Steam Guard code it asks for).
-   4. It prints your account name and a long **refresh token**. That token
-      works like your password: put it only in the secret below.
-
-   Or, with the .NET 8 or 9 SDK installed:
-   `dotnet run --project ios/tools/SteamFetch -- login`.
+2. **Turn on Issues** under **Settings → General → Features → Issues**. The
+   build asks you for your Steam Guard code in an issue (see *Build*).
 3. **Add three repository secrets** under **Settings → Secrets and variables →
    Actions → New repository secret**:
 
    | Name | Value |
    |---|---|
-   | `STEAM_USERNAME` | the account name SteamFetch printed |
-   | `STEAM_REFRESH_TOKEN` | the refresh token SteamFetch printed |
+   | `STEAM_USERNAME` | your Steam account name |
+   | `STEAM_PASSWORD` | your Steam password |
    | `IPA_PASSWORD` | a password you make up; you'll type it to unzip the app |
 
    Secrets are encrypted, are never shown in logs, and aren't given to pull
    requests from other people's forks. Only workflows you start can use them.
-   The token lasts for months. If a build says Steam rejected the login, run
-   `SteamFetch login` again and replace the secret. To revoke it, use **Steam
-   → Settings → Security → Manage Steam Guard → Remove all authorized
-   devices**, or change your password.
-
-   (Without `STEAM_REFRESH_TOKEN`, the build signs in with a
-   `STEAM_PASSWORD` secret and waits for you to approve it in the Steam
-   mobile app. That only works when Steam accepts sign-ins from the runner's
-   location.)
 4. **Install the game on your PC through Steam** (same branch you build
    for). You'll copy its `SlayTheSpire2.pck` to the phone.
 
@@ -114,8 +90,30 @@ send these instead:
 1. **Actions → "iOS game build" → Run workflow.** Pick branch
    `main`, source `steam`, and Steam branch `public`
    (or the beta you play).
-2. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
+2. About a minute later, GitHub notifies you of a new issue, **"Steam Guard
+   code for iOS build #N"**, that mentions you. Open the **Steam app →
+   Steam Guard** (shield icon) and reply to the issue with the 5-character
+   code. Send it right after the code changes; codes last 30 seconds. If your
+   Steam Guard uses e-mail instead, reply with the code from the e-mail. The
+   build reads only your replies, deletes each one after reading it, and
+   closes the issue once it's signed in. It waits 15 minutes for a code.
+
+   Why not "approve in the Steam app"? GitHub's build machines are in the
+   US/UK, and Steam blocks approving a sign-in from that far away ("Steam has
+   blocked this sign in"). A typed code isn't blocked.
+3. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
    (kept for 3 days).
+
+**Skip the code with a saved login (optional, needs a PC).** On Windows or
+Linux, download **SteamFetch-win-x64** or **SteamFetch-linux-x64** from the
+latest **Actions → "SteamFetch"** run, and run `SteamFetch login` (or
+`dotnet run --project ios/tools/SteamFetch -- login` with the .NET SDK).
+Sign in, approve in the Steam app (it's on your network, so Steam allows
+it), and add the refresh token it prints as the `STEAM_REFRESH_TOKEN`
+secret. Builds then sign in without a code. The token works like your
+password and lasts for months. To revoke it, use **Steam → Settings →
+Security → Manage Steam Guard → Remove all authorized devices**, or change
+your password.
 
 ### Install
 
@@ -176,7 +174,7 @@ suspend/resume handling.
 
 ```
 Steam (your account) ──► data_*/sts2.dll + deps, SlayTheSpire2.pck (CI only)
-        │                       tools/SteamFetch (saved login) or DepotDownloader
+        │                       tools/SteamFetch (+ steam_guard_code.py for the Steam Guard code)
         ├─ tools/select_assemblies.py   game's own managed DLLs, no .NET runtime
         ├─ tools/IlPatcher              skip Steam/Sentry init, call Sts2Ios.Hooks
         ├─ support/Sts2IosSupport       Steam stub resolver, AOT-safe atlas JSON, diagnostics
