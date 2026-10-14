@@ -6,7 +6,7 @@ An Android launcher + mod manager for **Slay the Spire 2**, built on a custom Go
 
 **New in this fork: an experimental iOS port** for iPhone and iPad. It's built in the cloud on GitHub's macOS runners, so no Mac is needed, and sideloaded from Windows with a free Apple ID. See [iPhone / iPad (experimental)](#iphone--ipad-experimental).
 
-**Also in this fork: StS2 Launcher Perf**, an Android build of the upstream release for lower-end devices. It renders the game at about 1080p instead of full screen resolution and installs next to the original app. See [Android perf build](#android-perf-build-lower-end-devices).
+**Also in this fork: StS2 Launcher Perf**, an Android build of the upstream release with an English launcher and performance settings you can change without rebuilding (FPS cap, vsync, particles, resolution, effects, frame-time log). It installs next to the original app. See [Android perf build](#android-perf-build-lower-end-devices).
 
 **Current release: [v0.4.1](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest)**
 
@@ -48,7 +48,8 @@ Full guide, troubleshooting, and how the build works: **[ios/README.md](ios/READ
 
 **StS2 Launcher Perf** is the upstream release APK with a small add-on, published on this fork's [Releases page](../../releases/latest):
 
-- **Graphics: Fast** (default) renders the game at its layout resolution, about 1080p, and scales it up to the screen. On a 2560×1600 tablet like the Xiaomi Pad 5 that's under half the pixels. It also turns off HDR 2D, FXAA and debanding if the game uses them. **Graphics: Sharp** is upstream's full-resolution rendering. The switch is next to **Debug** on the launcher's main screen.
+- **Perf settings** (next to **Debug** on the launcher's main screen): FPS cap, vsync, particle amount, a lower render resolution, full-screen effects, and a frame-time log for benchmarking. The defaults change nothing. Settings are kept in a plain text file the app re-reads every 2 seconds, so they can also be changed over adb while playing.
+- The launcher's Korean-only dialogs are in English.
 - Its own package id (`com.game.sts2launcher.modmanager.perf`), so it installs next to the original app without touching its data.
 - Everything else is upstream's code, unchanged. The launcher update check points at this fork.
 

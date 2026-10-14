@@ -1,65 +1,160 @@
 using System;
+using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using Godot;
 
 namespace STS2Perf;
 
-// The perf build's own settings, in user://sts2perf.cfg (the app's private
-// files dir). Read lazily: OS.GetUserDataDir() is a Godot call and must not
-// run from PerfEntry.Apply.
+// The perf build's settings: user://sts2perf.cfg (the app's private files
+// dir), one key=value per line, '#' starts a comment line. The launcher's
+// Perf settings panel writes it, and so can a script over adb; PerfRuntime
+// re-reads it every couple of seconds, so changes apply while the game runs.
+//
+//   resolution=full|reduced     reduced: render at the layout size
+//   effects=on|off              off: HDR 2D, FXAA, debanding off
+//   max_fps=0|<n>               0 = the game's FPS limit setting
+//   vsync=game|on|off|adaptive|mailbox
+//   particles=<0-100>           % of particles emitted (100 = as designed)
+//   frame_log=<seconds>         frame-time stats line every N s; 0 = off
+//   root.<property>=<value>     any property of the game's root Window
+//   engine.<property>=<value>   any property of Engine
+//
+// graphics=fast|sharp from 0.4.2.1-0.4.2.3 still works when resolution and
+// effects are absent. Defaults leave everything as upstream ships it.
+//
+// Lazy: OS.GetUserDataDir() is a Godot call and must not run from
+// PerfEntry.Apply.
 internal static class PerfSettings
 {
     private const string FileName = "sts2perf.cfg";
-    private static bool? _fastGraphics;
+    private static Dictionary<string, string> _values = new();
+    private static DateTime _mtime;
+    private static bool _loaded;
 
-    // Fast graphics is the default: this build exists for lower-end devices.
-    public static bool FastGraphics
+    public static string FilePath => Path.Combine(OS.GetUserDataDir(), FileName);
+
+    public static bool ReducedResolution => Value("resolution") == "reduced";
+    public static bool EffectsOff => Value("effects") == "off";
+    public static int MaxFps => Int("max_fps", 0, 0, 1000);
+    public static string Vsync => Value("vsync");
+    public static int ParticlesPercent => Int("particles", 100, 0, 100);
+    public static int FrameLogSeconds => Int("frame_log", 0, 0, 600);
+
+    public static IEnumerable<(string Target, string Property, string Value)> PropertyOverrides
     {
         get
         {
-            Load();
-            return _fastGraphics.Value;
-        }
-        set
-        {
-            _fastGraphics = value;
-            Save();
-        }
-    }
-
-    private static string FilePath => Path.Combine(OS.GetUserDataDir(), FileName);
-
-    private static void Load()
-    {
-        if (_fastGraphics.HasValue)
-            return;
-        _fastGraphics = true;
-        try
-        {
-            if (!File.Exists(FilePath))
-                return;
-            foreach (var line in File.ReadAllLines(FilePath))
+            EnsureLoaded();
+            foreach (var (key, value) in _values)
             {
-                var parts = line.Split('=', 2);
-                if (parts.Length == 2 && parts[0].Trim() == "graphics")
-                    _fastGraphics = parts[1].Trim() != "sharp";
+                var dot = key.IndexOf('.');
+                if (dot > 0 && key[..dot] is "root" or "engine")
+                    yield return (key[..dot], key[(dot + 1)..], value);
             }
         }
-        catch (Exception ex)
-        {
-            PerfEntry.Log($"settings read failed: {ex.Message}");
-        }
     }
 
-    private static void Save()
+    // A named setting's effective value, lower-cased, defaults applied.
+    public static string Value(string key)
     {
+        EnsureLoaded();
+        var fast = Raw("graphics") == "fast";
+        return key switch
+        {
+            "resolution" => Raw("resolution") ?? (fast ? "reduced" : "full"),
+            "effects" => Raw("effects") ?? (fast ? "off" : "on"),
+            "max_fps" => Raw("max_fps") ?? "0",
+            "vsync" => Raw("vsync") ?? "game",
+            "particles" => Raw("particles") ?? "100",
+            "frame_log" => Raw("frame_log") ?? "0",
+            _ => Raw(key),
+        };
+    }
+
+    public static void Set(string key, string value)
+    {
+        EnsureLoaded();
+        _values[key] = value;
+        // Written explicitly now, so the legacy key no longer decides anything.
+        if (key is "resolution" or "effects")
+        {
+            _values.TryAdd("resolution", Value("resolution"));
+            _values.TryAdd("effects", Value("effects"));
+            _values.Remove("graphics");
+        }
         try
         {
-            File.WriteAllText(FilePath, $"graphics={(_fastGraphics == false ? "sharp" : "fast")}\n");
+            File.WriteAllLines(FilePath, _values.Select(kv => $"{kv.Key}={kv.Value}"));
+            _mtime = File.GetLastWriteTimeUtc(FilePath);
         }
         catch (Exception ex)
         {
             PerfEntry.Log($"settings write failed: {ex.Message}");
         }
     }
+
+    // Re-reads the file if it changed on disk. True when any value changed.
+    public static bool Reload()
+    {
+        try
+        {
+            var mtime = File.Exists(FilePath) ? File.GetLastWriteTimeUtc(FilePath) : DateTime.MinValue;
+            if (_loaded && mtime == _mtime)
+                return false;
+            _loaded = true;
+            _mtime = mtime;
+
+            var fresh = new Dictionary<string, string>();
+            if (mtime != DateTime.MinValue)
+            {
+                foreach (var line in File.ReadAllLines(FilePath))
+                {
+                    var trimmed = line.Trim();
+                    if (trimmed.Length == 0 || trimmed.StartsWith('#'))
+                        continue;
+                    var parts = trimmed.Split('=', 2);
+                    if (parts.Length == 2)
+                        fresh[parts[0].Trim().ToLowerInvariant()] = parts[1].Trim();
+                }
+            }
+            var changed =
+                fresh.Count != _values.Count
+                || fresh.Any(kv => !_values.TryGetValue(kv.Key, out var v) || v != kv.Value);
+            _values = fresh;
+            return changed;
+        }
+        catch (Exception ex)
+        {
+            PerfEntry.Log($"settings read failed: {ex.Message}");
+            return false;
+        }
+    }
+
+    public static string Summary()
+    {
+        var parts = new List<string>
+        {
+            $"resolution {Value("resolution")}",
+            $"effects {Value("effects")}",
+            $"fps cap {(MaxFps > 0 ? MaxFps.ToString() : "game")}",
+            $"vsync {Vsync}",
+            $"particles {ParticlesPercent}%",
+            $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
+        };
+        parts.AddRange(PropertyOverrides.Select(o => $"{o.Target}.{o.Property}={o.Value}"));
+        return string.Join(", ", parts);
+    }
+
+    private static void EnsureLoaded()
+    {
+        if (!_loaded)
+            Reload();
+    }
+
+    private static string Raw(string key) =>
+        _values.TryGetValue(key, out var v) ? v.ToLowerInvariant() : null;
+
+    private static int Int(string key, int fallback, int min, int max) =>
+        int.TryParse(Value(key), out var n) ? Math.Clamp(n, min, max) : fallback;
 }

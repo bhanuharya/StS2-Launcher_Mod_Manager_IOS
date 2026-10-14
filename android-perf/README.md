@@ -1,9 +1,9 @@
 # StS2 Launcher Perf (Android, for lower-end devices)
 
 A build of the upstream [StS2 Launcher Mod Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager)
-release with a small performance add-on. Made for tablets and phones that
-struggle with the game at full resolution, like the Xiaomi Pad 5 (Snapdragon
-860, 2560×1600).
+release with a small add-on: an English launcher, performance settings you
+can change without rebuilding the APK, and a frame-time log for measuring
+them. It was made on and for a Xiaomi Pad 5 (Snapdragon 860, 2560×1600).
 
 Download it from this repo's **Releases** page (`StS2LauncherPerf-v….apk`).
 
@@ -11,36 +11,93 @@ Download it from this repo's **Releases** page (`StS2LauncherPerf-v….apk`).
 
 | | Upstream | Perf build |
 |---|---|---|
-| Render resolution | Full screen resolution | **Graphics: Fast** (default): the game's layout resolution, about 1080p, scaled up to the screen |
-| Full-screen effects | As the game sets them | Fast turns off HDR 2D, FXAA and debanding if the game uses them |
 | App | `com.game.sts2launcher.modmanager`, "StS2 Launcher Mod" | `com.game.sts2launcher.modmanager.perf`, "StS2 Launcher Perf": installs **next to** the original |
 | Launcher text | Many dialogs only in Korean (Save Manager, backups, cloud sync, Mod Hub messages) | English everywhere |
+| Performance settings | — | **Perf settings** panel and `sts2perf.cfg`; defaults change nothing |
+| Frame-time log | — | Optional `[Perf]` stats line every N seconds |
 | Launcher updates | Upstream releases | This fork's releases |
 
 Everything else is upstream's code, unchanged: Steam login, downloads,
 Workshop, mods, Save Manager, cloud sync, LAN.
 
-**How much it saves.** The launcher lays the game out on a 1680×1080 canvas
-(stretched to your screen's shape, and smaller as you raise UI Scale). Fast
-renders that canvas at its own size instead of at screen resolution:
+## Performance settings
 
-| Screen | UI Scale | Fast renders | Pixels vs. full |
-|---|---|---|---|
-| 2560×1600 tablet (Pad 5) | 100% | 1728×1080 | 46% |
-| 2400×1080 phone | 100% | 2400×1080 | 100% (no change) |
-| 3200×1440 phone | 100% | 2400×1080 | 56% |
+Tap **Perf settings** (next to **Debug**, above the launcher's console). Each
+row's button steps through its values; changes are saved right away and apply
+when the game starts.
 
-Text gets a little softer, about like Android's Game Mode "performance"
-downscale. A larger UI Scale lowers the Fast resolution further.
+| Setting | Values | What it does |
+|---|---|---|
+| Resolution | Full, Low res | Low res renders at the game's layout size (1728×1080 on a 2560×1600 tablet) and scales up. Softer, and on a Pad 5 it measured *worse* than Android's Game Mode downscale (below). |
+| HDR / FXAA / debanding | As the game sets, Off | Turns those full-screen effects off if the game uses them. The log says which were on. |
+| FPS cap | Game setting, 30, 40, 45, 60, 90, 120 | Overrides the game's FPS limit. Pick a divisor of the display's refresh rate (40 or 60 on 120 Hz) for even pacing. |
+| VSync | Game setting, On, Off, Adaptive, Mailbox | Overrides the game's vsync. |
+| Particles | 100%, 75%, 50%, 25%, Off | Scales how many particles every emitter spawns. |
+| Frame-time log | Off, 5 s, 10 s, 30 s | See below. |
 
-**Switching.** On the launcher's main screen, the **Graphics: Fast / Sharp**
-button sits next to **Debug** above the console. The change applies the next
-time the game starts. **Sharp** is exactly upstream's rendering. The launcher
-console and the Debug log show what Fast did, in lines starting with `[Perf]`.
+"Game setting" / 100% / Full / "As the game sets" leave the game exactly as
+upstream ships it, and turning a setting back restores the game's own value.
 
-If you set up Android Game Mode downscaling for the original app, you don't
-need it for this one. Game Mode settings are per app, so the perf build starts
-without them.
+**What mattered on the Pad 5:** the game's own FPS limit. At 30 fps on a
+120 Hz panel, frames land unevenly (120/31 isn't a whole number) and it reads
+as choppy. 60 fps with vsync on and the display at 60 Hz was smooth with the
+GPU at mid clock; 120 fps pins it at max clock (~90% busy).
+
+**Game Mode downscale (root):** renders at a lower resolution and lets the
+compositor scale it, which costs less than Low res. It's per app, so set it
+for the perf package:
+
+```bash
+adb shell su -c 'device_config put game_overlay com.game.sts2launcher.modmanager.perf "mode=2,downscaleFactor=0.75:mode=3,downscaleFactor=0.6"'
+adb shell su -c 'cmd game mode performance com.game.sts2launcher.modmanager.perf'
+# undo: device_config delete game_overlay <package>; cmd game mode standard <package>
+```
+
+## Settings file, live changes and benchmarking
+
+Everything in the panel lives in
+`/data/data/com.game.sts2launcher.modmanager.perf/files/sts2perf.cfg`, one
+`key=value` per line (`#` starts a comment). **While the game runs, the
+add-on re-reads the file every 2 seconds and applies changes**, so a script
+can switch settings mid-fight with no restart and no rebuild:
+
+| Key | Values | Default |
+|---|---|---|
+| `resolution` | `full`, `reduced` | `full` |
+| `effects` | `on`, `off` | `on` |
+| `max_fps` | `0` (game setting) or a number | `0` |
+| `vsync` | `game`, `on`, `off`, `adaptive`, `mailbox` | `game` |
+| `particles` | `0`–`100` (percent) | `100` |
+| `frame_log` | seconds between stats lines, `0` = off | `0` |
+| `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
+| `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
+
+`root.*` and `engine.*` take bools (`true`/`false`), numbers, and enum values
+as numbers, matched to the property's type. Removing a line puts the game's
+value back. The older `graphics=fast|sharp` key from 0.4.2.1–0.4.2.3 still
+works when `resolution` and `effects` are absent.
+
+```bash
+PKG=com.game.sts2launcher.modmanager.perf
+CFG=/data/data/$PKG/files/sts2perf.cfg
+adb shell su -c "printf 'frame_log=10\\nmax_fps=40\\n' > $CFG && chown \$(stat -c %u:%g /data/data/$PKG/files) $CFG && restorecon $CFG"
+adb logcat | grep --line-buffered '\[Perf\]'
+```
+
+(The `chown`/`restorecon` keep the file writable by the app, so the in-app
+panel can still save.)
+
+Every change is logged (`[Perf] settings changed: …`, then what was applied),
+and with `frame_log` set, a line like this every N seconds:
+
+```
+[Perf] frames 10s: 59.8 fps | ms p50 16.7 p95 17.9 p99 24.1 max 41.3 | hitches 3 | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full | effects on (hdr2d off) | particles 100%
+```
+
+Frame times are the game's main-loop iterations, which on Android is also the
+render thread. `hitches` counts frames slower than 1.5× the median. Android
+can't time this app's frames from outside (its SurfaceView has no per-frame
+latency data), so this is the way to compare settings.
 
 ## Install
 
@@ -134,23 +191,17 @@ Java code, FMOD and Spine libraries are upstream's binaries, byte for byte.
 The add-on hooks the launcher's own methods with Harmony, like the launcher
 hooks the game:
 
-- `LauncherView` constructor → adds the Graphics button.
-- `UiScalePatches.ApplyScaledContentSize`, the game's `OnWindowChange`
-  handlers, and the launcher closing → switch the root window to the
-  `viewport` stretch mode in Fast. This keeps the same layout and touch mapping
-  but renders at the layout size.
+- `LauncherView` constructor → adds the **Perf settings** button and starts
+  the settings watcher (a 2-second timer that re-reads `sts2perf.cfg`).
+- The launcher closing, `UiScalePatches.ApplyScaledContentSize` and the
+  game's `OnWindowChange` handlers → apply the settings. Low res switches the
+  root window to the `viewport` stretch mode, which keeps the same layout and
+  touch mapping but renders at the layout size. It waits for the game's own
+  window handlers, because a resize during the PLAY handoff makes
+  `NGame.OnWindowChange` throw.
 - `AppUpdateChecker.GetInstalledVersion` → reports the perf version.
 - `SaveProgressSummary.FormatCurrentRun` → "Act 2, Floor 7" (word order the
   translation table can't change).
-
-**Translations.** `translations.json` maps each Korean string literal in the
-upstream `STS2Mobile.dll` to English, matched exactly. Interpolated strings
-are split into pieces at their `{…}` holes, so each piece is translated on its
-own. After moving to a new upstream release, the build prints
-`WARNING: untranslated: …` for any new Korean text; add it to the table.
-`LauncherPatcher --list-strings STS2Mobile.dll` lists them all. The texture
-cache rebuild screen shown after a game update is drawn by the Java side
-and stays in Korean.
 
 If the add-on fails to load, the launcher logs `[STS2Perf] ... failed to load`
 and runs exactly like upstream.

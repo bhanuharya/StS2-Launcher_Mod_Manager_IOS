@@ -29,8 +29,8 @@ public static class PerfEntry
         Log($"STS2Perf {Version} loaded");
         var harmony = new Harmony("com.sts2perf");
         Run("update check", () => UpdateRedirect.Apply(harmony));
-        Run("graphics toggle", () => GraphicsToggle.Apply(harmony));
-        Run("render mode", () => RenderMode.Apply(harmony));
+        Run("settings panel", () => PerfPanel.Apply(harmony));
+        Run("settings runtime", () => PerfRuntime.Apply(harmony));
         Run("english text", () => EnglishText.Apply(harmony));
     }
 
