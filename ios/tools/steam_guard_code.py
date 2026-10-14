@@ -26,7 +26,7 @@ import urllib.error
 import urllib.request
 
 WAIT_SECONDS = 15 * 60
-POLL_SECONDS = 3
+POLL_SECONDS = 2
 # A reply that is just the code, in any case, or a 5-character upper-case
 # word in a longer reply ("code 7KX2P").
 CODE_ONLY = re.compile(r"^[\s`'\".:]*([A-Za-z0-9]{5})[\s`'\".:]*$")
@@ -82,6 +82,9 @@ def open_issue(kind, user):
         f"needs a Steam Guard code to sign in to Steam.\n\n"
         f"**Reply to this issue with {where}.** "
         "App codes change every 30 seconds, so send it right after it changes.\n\n"
+        "The Steam app will also show sign-in requests from the build machine. "
+        "**Close them without tapping Approve or Deny**: Steam blocks approving from that far away, "
+        "and the code is what signs the build in.\n\n"
         "Only your replies are read, and each one is deleted after it's read. "
         "This issue closes when the build is signed in. "
         f"The build waits {WAIT_SECONDS // 60} minutes for a code."

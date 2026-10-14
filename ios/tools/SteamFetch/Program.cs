@@ -43,6 +43,11 @@ static class SteamFetchProgram
             if (args.Length >= 1 && args[0] == "download")
                 return await Download(ParseOptions(args.Skip(1).ToArray()));
         }
+        catch (AsyncJobFailedException)
+        {
+            Console.Error.WriteLine("ERROR: lost the connection to Steam in the middle of a request.");
+            return 1;
+        }
         catch (Exception ex)
         {
             Console.Error.WriteLine($"ERROR: {ex.Message}");
@@ -142,27 +147,20 @@ static class SteamFetchProgram
             throw new ArgumentException("set STEAM_REFRESH_TOKEN, or STEAM_PASSWORD");
         var filter = FileFilter.Load(o.GetValueOrDefault("filelist") ?? throw new ArgumentException("--filelist is required"));
 
-        await using var session = await SteamSession.ConnectAsync();
+        SteamSession session;
         if (string.IsNullOrEmpty(token))
         {
             var codeCommand = o.GetValueOrDefault("code-command");
             Func<string, bool, Task<string>> getCode = codeCommand != null
                 ? (kind, retry) => RunCodeCommand(codeCommand, kind, retry)
                 : PromptForCode;
-            var auth = await session.Client.Authentication.BeginAuthSessionViaCredentialsAsync(
-                new AuthSessionDetails
-                {
-                    Username = user,
-                    Password = password,
-                    IsPersistentSession = false,
-                    DeviceFriendlyName = "StS2 iOS build (SteamFetch)",
-                    Authenticator = new CodeAuthenticator(getCode),
-                }
-            );
-            var result = await auth.PollingWaitForResultAsync();
-            token = result.RefreshToken;
-            user = result.AccountName;
+            (session, token, user) = await SignInWithCodeAsync(user, password!, getCode);
         }
+        else
+        {
+            session = await SteamSession.ConnectAsync();
+        }
+        await using var _ = session;
         await session.LogOnAsync(user, token);
         Console.WriteLine($"Logged in as {user}");
 
@@ -170,6 +168,65 @@ static class SteamFetchProgram
         var count = await downloader.RunAsync();
         Console.WriteLine($"Downloaded {count} files to {dir}");
         return count > 0 ? 0 : 1;
+    }
+
+    // Steam closes a connection that hasn't signed in within about a minute,
+    // longer than it takes someone to read the Steam app and send the code.
+    // So for app codes: start a session to learn what Steam wants, wait for
+    // the code with no connection open, then sign in again and send it at
+    // once. E-mail codes are only sent when a session starts, so those are
+    // waited for on that session.
+    private static async Task<(SteamSession, string, string)> SignInWithCodeAsync(
+        string user, string password, Func<string, bool, Task<string>> getCode)
+    {
+        string? code = null;
+        var codeWasRejected = false;
+        for (var attempt = 1; attempt <= 6; attempt++)
+        {
+            var session = await SteamSession.ConnectAsync();
+            var needCode = false;
+            var authenticator = new CodeAuthenticator(async (kind, previousWasIncorrect) =>
+            {
+                if (kind != "device")
+                    return await getCode(kind, previousWasIncorrect);
+                if (previousWasIncorrect || code == null)
+                {
+                    needCode = true;
+                    codeWasRejected = previousWasIncorrect;
+                    throw new OperationCanceledException("waiting for a Steam Guard code");
+                }
+                var next = code;
+                code = null;
+                return next;
+            });
+            try
+            {
+                var auth = await session.Client.Authentication.BeginAuthSessionViaCredentialsAsync(
+                    new AuthSessionDetails
+                    {
+                        Username = user,
+                        Password = password,
+                        IsPersistentSession = false,
+                        DeviceFriendlyName = "StS2 iOS build (SteamFetch)",
+                        Authenticator = authenticator,
+                    }
+                );
+                var result = await auth.PollingWaitForResultAsync();
+                return (session, result.RefreshToken, result.AccountName);
+            }
+            catch (Exception) when (needCode)
+            {
+                await session.DisposeAsync();
+            }
+            catch
+            {
+                await session.DisposeAsync();
+                throw;
+            }
+            code = await getCode("device", codeWasRejected);
+            Console.WriteLine("Signing in with the code...");
+        }
+        throw new InvalidOperationException("Steam didn't accept a code after several tries");
     }
 
     // Runs PROGRAM <kind> <first|retry>; its standard output is the code. Its
@@ -228,8 +285,10 @@ sealed class SteamSession : IAsyncDisposable
         Content = Client.GetHandler<SteamContent>()!;
         _callbacks = new CallbackManager(Client);
         _callbacks.Subscribe<SteamClient.ConnectedCallback>(_ => _connected.TrySetResult(true));
-        _callbacks.Subscribe<SteamClient.DisconnectedCallback>(_ =>
+        _callbacks.Subscribe<SteamClient.DisconnectedCallback>(cb =>
         {
+            if (!cb.UserInitiated)
+                Console.WriteLine("Steam closed the connection.");
             _connected.TrySetException(new IOException("couldn't connect to Steam"));
             _loggedOn.TrySetException(new IOException("disconnected from Steam"));
         });

@@ -98,9 +98,10 @@ send these instead:
    build reads only your replies, deletes each one after reading it, and
    closes the issue once it's signed in. It waits 15 minutes for a code.
 
-   Why not "approve in the Steam app"? GitHub's build machines are in the
-   US/UK, and Steam blocks approving a sign-in from that far away ("Steam has
-   blocked this sign in"). A typed code isn't blocked.
+   The Steam app also pops up sign-in requests from the build machine.
+   **Close them without tapping Approve or Deny.** GitHub's build machines
+   are in the US/UK, and Steam blocks approving a sign-in from that far away
+   ("Steam has blocked this sign in"). A typed code isn't blocked.
 3. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
    (kept for 3 days).
 
