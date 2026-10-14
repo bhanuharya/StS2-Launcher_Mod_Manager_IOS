@@ -6,11 +6,13 @@ An Android launcher + mod manager for **Slay the Spire 2**, built on a custom Go
 
 **New in this fork: an experimental iOS port** for iPhone and iPad. It's built in the cloud on GitHub's macOS runners, so no Mac is needed, and sideloaded from Windows with a free Apple ID. See [iPhone / iPad (experimental)](#iphone--ipad-experimental).
 
+**Also in this fork: StS2 Launcher Perf**, an Android build of the upstream release for lower-end devices. It renders the game at about 1080p instead of full screen resolution and installs next to the original app. See [Android perf build](#android-perf-build-lower-end-devices).
+
 **Current release: [v0.4.1](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest)**
 
 > **📖 사용설명서 (한국어)** — 설치부터 모드/세이브 관리까지 스크린샷과 함께 설명하는 단계별 가이드: **[docs/USER_GUIDE.md](docs/USER_GUIDE.md)**
 
-> **Fork notice** — This repository forks [iunius612/StS2-Launcher_Mod_Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager) to add the iOS port (`ios/`). The Android launcher is unchanged; its releases and issues live upstream. That project is itself a community fork of [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher). The upstream launcher's mod loader stopped working with newer game builds; this fork keeps mod loading compatible with each game update and adds Workshop support, save-data safety features, and mobile-UX improvements. See [Differences from upstream](#differences-from-upstream).
+> **Fork notice** — This repository forks [iunius612/StS2-Launcher_Mod_Manager](https://github.com/iunius612/StS2-Launcher_Mod_Manager) to add the iOS port (`ios/`) and an Android performance build (`android-perf/`). The Android launcher's source is unchanged; its releases and issues live upstream. That project is itself a community fork of [Ekyso/StS2-Launcher](https://github.com/Ekyso/StS2-Launcher). The upstream launcher's mod loader stopped working with newer game builds; this fork keeps mod loading compatible with each game update and adds Workshop support, save-data safety features, and mobile-UX improvements. See [Differences from upstream](#differences-from-upstream).
 
 > **Disclaimer** — Unofficial community project. Slay the Spire 2 is developed and published by Mega Crit Games. A valid Steam account that owns Slay the Spire 2 is required; game files are downloaded directly from Steam after authentication. No game assets are included in this repository.
 
@@ -41,6 +43,16 @@ Quick start:
 4. Unzip the artifact with 7-Zip, sideload `StS2.ipa` with Sideloadly, copy `SlayTheSpire2.pck` into the app's folder, and play.
 
 Full guide, troubleshooting, and how the build works: **[ios/README.md](ios/README.md)**.
+
+## Android perf build (lower-end devices)
+
+**StS2 Launcher Perf** is the upstream release APK with a small add-on, published on this fork's [Releases page](../../releases/latest):
+
+- **Graphics: Fast** (default) renders the game at its layout resolution, about 1080p, and scales it up to the screen. On a 2560×1600 tablet like the Xiaomi Pad 5 that's under half the pixels. It also turns off HDR 2D, FXAA and debanding if the game uses them. **Graphics: Sharp** is upstream's full-resolution rendering. The switch is next to **Debug** on the launcher's main screen.
+- Its own package id (`com.game.sts2launcher.modmanager.perf`), so it installs next to the original app without touching its data.
+- Everything else is upstream's code, unchanged. The launcher update check points at this fork.
+
+It's built on GitHub from upstream's published APK, with no game files involved. Details, install steps, and how to publish a release: **[android-perf/README.md](android-perf/README.md)**.
 
 ## Differences from upstream
 
@@ -146,6 +158,7 @@ android/                   # Godot Android gradle project
 tools/memberref-audit/     # Static IL audit of patches vs. a new game build
 scripts/                   # Build and tooling scripts
 docs/                      # User guide (Korean) + images
+android-perf/              # Android perf build (see android-perf/README.md)
 ios/                       # iOS port (see ios/README.md)
   probe/                   # Phase 0 probe app (device + toolchain check)
   game/                    # Stub Godot project that drives the iOS export
@@ -155,7 +168,7 @@ ios/                       # iOS port (see ios/README.md)
   tools/                   # IL patcher, .pck / project.binary tools
   scripts/                 # Build scripts (CI) + Linux rehearsal
   test/                    # Stand-in game for pipeline tests
-.github/workflows/         # iOS probe + iOS game builds (GitHub macOS runners)
+.github/workflows/         # iOS probe + iOS game builds, Android perf build
 ```
 
 ### Prerequisites
