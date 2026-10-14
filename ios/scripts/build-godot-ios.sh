@@ -91,6 +91,19 @@ if [ ! -f "$APP/Frameworks/$ASSEMBLY.framework/$ASSEMBLY" ] && [ ! -f "$APP/Fram
     exit 1
 fi
 
+# Godot finds the C# runtime through this exported entry point; without it the
+# app starts with no C# and dies when it loads a C# script.
+AOT_BIN="$APP/Frameworks/$ASSEMBLY.framework/$ASSEMBLY"
+[ -f "$AOT_BIN" ] || AOT_BIN="$APP/Frameworks/$ASSEMBLY.dylib"
+log "C# library: $(lipo -info "$AOT_BIN" 2>&1 | sed 's/.*: //')"
+otool -l "$AOT_BIN" | grep -A4 LC_BUILD_VERSION | grep -E 'minos|sdk' | sed 's/^ */    /' || true
+otool -L "$AOT_BIN" | tail -n +2 | sed 's/^\t*/    links /' || true
+if nm -gU "$AOT_BIN" 2>/dev/null | grep -q ' _godotsharp_game_main_init$'; then
+    log "C# library exports godotsharp_game_main_init"
+else
+    echo "::warning::$ASSEMBLY does not export godotsharp_game_main_init; the app will start without C#"
+fi
+
 if [ -n "${APP_EXTRA_DIR:-}" ] && [ -d "$APP_EXTRA_DIR" ]; then
     cp -R "$APP_EXTRA_DIR"/. "$APP/"
 fi

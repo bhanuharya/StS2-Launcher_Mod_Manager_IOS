@@ -52,6 +52,17 @@ your GPU can read the PC game's BC-compressed textures (`Texture BC7: YES/NO`).
 7. Send back the report. Either take a screenshot, or open
    **Files → On My iPhone → StS2 iOS Probe → probe_report.txt**.
 
+**If the probe closes by itself** (for example right after the Godot splash),
+send these instead:
+
+- From **Files → On My iPhone → StS2 iOS Probe**: `probe_progress.txt` (its
+  last line is the step it died on), `probe_report.txt` if it exists, and
+  `logs/godot.log`. If the folder isn't there, the app died before Godot could
+  write anything.
+- The crash report: **Settings → Privacy & Security → Analytics &
+  Improvements → Analytics Data**, open the newest entry starting with
+  `StS2Probe`, and share it.
+
 ## Phase 1: the game
 
 ### One-time setup

@@ -10,6 +10,14 @@ config/name="StS2 iOS Probe"
 run/main_scene="res://Main.tscn"
 config/features=PackedStringArray("4.5", "C#", "Mobile")
 config/icon="res://icon.svg"
+; Write every log line straight to user://logs/godot.log, so the log is
+; complete even if the app is killed.
+run/flush_stdout_on_print=true
+
+[debug]
+
+file_logging/enable_file_logging=true
+settings/stdout/verbose_stdout=true
 
 [display]
 

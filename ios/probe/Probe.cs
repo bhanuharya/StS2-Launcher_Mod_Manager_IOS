@@ -16,16 +16,52 @@ namespace StS2iOSProbe;
 // records the facts the real port depends on. The most important one is whether
 // the GPU can sample BC-compressed textures, which the desktop game's .pck uses.
 // The report is shown on screen and saved to user://probe_report.txt, which the
-// Files app can reach (On My iPhone > StS2 iOS Probe).
+// Files app can reach (On My iPhone > StS2 iOS Probe). Each step is also
+// appended to probe_progress.txt before it runs, so if the app dies, the last
+// line names the step that killed it (the previous run's file is kept as
+// probe_progress_prev.txt). Godot's own log is in logs/godot.log.
 public partial class Probe : Control
 {
     private Label _report;
     private Label _touch;
     private readonly Dictionary<int, Vector2> _points = new();
     private string _lastPointer = "none yet";
+    private static string _progressPath;
+
+    public override void _EnterTree()
+    {
+        try
+        {
+            var dir = OS.GetUserDataDir();
+            _progressPath = System.IO.Path.Combine(dir, "probe_progress.txt");
+            var prev = System.IO.Path.Combine(dir, "probe_progress_prev.txt");
+            if (System.IO.File.Exists(_progressPath))
+                System.IO.File.Copy(_progressPath, prev, overwrite: true);
+            System.IO.File.WriteAllText(_progressPath, "");
+        }
+        catch (Exception e)
+        {
+            GD.PrintErr($"[probe] can't write progress file: {e.Message}");
+        }
+        Step("C# script running (_EnterTree)");
+    }
+
+    // Records that a step is about to run, flushed to disk before it runs.
+    private static void Step(string what)
+    {
+        GD.Print($"[probe] {what}");
+        if (_progressPath == null)
+            return;
+        try
+        {
+            System.IO.File.AppendAllText(_progressPath, $"{DateTime.UtcNow:HH:mm:ss.fff} {what}\n");
+        }
+        catch { }
+    }
 
     public override void _Ready()
     {
+        Step("_Ready: building UI");
         var scroll = new ScrollContainer();
         scroll.SetAnchorsPreset(LayoutPreset.FullRect);
         scroll.OffsetLeft = 24;
@@ -59,6 +95,17 @@ public partial class Probe : Control
         sb.AppendLine($"Time (UTC): {DateTime.UtcNow:yyyy-MM-dd HH:mm:ss}");
         sb.AppendLine();
 
+        // One section per frame, shown and saved as it goes, so a crash leaves
+        // the report up to the step before it.
+        async Task Next()
+        {
+            string partial = sb.ToString();
+            _report.Text = partial + "\n(running…)";
+            SaveReport(partial);
+            await ToSignal(GetTree(), SceneTree.SignalName.ProcessFrame);
+        }
+
+        await Next();
         Section(sb, "Device", () =>
         {
             sb.AppendLine($"OS: {OS.GetName()} {OS.GetVersion()}");
@@ -70,6 +117,7 @@ public partial class Probe : Control
             sb.AppendLine($"user:// = {OS.GetUserDataDir()}");
         });
 
+        await Next();
         Section(sb, "Display", () =>
         {
             sb.AppendLine($"Screen: {DisplayServer.ScreenGetSize()} @ scale {DisplayServer.ScreenGetScale()}");
@@ -77,6 +125,7 @@ public partial class Probe : Control
             sb.AppendLine($"Window: {DisplayServer.WindowGetSize()}  Safe area: {DisplayServer.GetDisplaySafeArea()}");
         });
 
+        await Next();
         Section(sb, "Rendering", () =>
         {
             sb.AppendLine($"Driver: {RenderingServer.GetCurrentRenderingDriverName()}");
@@ -103,6 +152,7 @@ public partial class Probe : Control
             };
             foreach (var (name, format) in formats)
             {
+                Step($"Rendering: texture format {name}");
                 bool ok = rd.TextureIsFormatSupportedForUsage(
                     format,
                     RenderingDevice.TextureUsageBits.SamplingBit
@@ -111,6 +161,7 @@ public partial class Probe : Control
             }
         });
 
+        await Next();
         Section(sb, ".NET runtime", () =>
         {
             sb.AppendLine($"Framework: {RuntimeInformation.FrameworkDescription}");
@@ -121,6 +172,7 @@ public partial class Probe : Control
 
         // StS2 discovers its content (cards, relics, ...) through reflection, so
         // check that NativeAOT kept type metadata and can instantiate by Type.
+        await Next();
         Section(sb, "Reflection", () =>
         {
             var types = typeof(Probe).Assembly.GetTypes();
@@ -138,6 +190,7 @@ public partial class Probe : Control
             sb.AppendLine($"PropertyInfo.GetValue: {prop?.GetValue(new ProbeSampleA())}");
         });
 
+        await Next();
         Section(sb, "Globalization", () =>
         {
             foreach (var name in new[] { "en-US", "ko-KR", "id-ID", "zh-CN", "ja-JP" })
@@ -147,6 +200,8 @@ public partial class Probe : Control
             }
         });
 
+        await Next();
+        Step("Threads");
         try
         {
             int fromPool = await Task.Run(() => System.Environment.CurrentManagedThreadId);
@@ -160,6 +215,7 @@ public partial class Probe : Control
         string text = sb.ToString();
         GD.Print(text);
         Callable.From(() => ShowReport(text)).CallDeferred();
+        Step("done");
     }
 
     private void ShowReport(string text)
@@ -179,6 +235,7 @@ public partial class Probe : Control
 
     private static void Section(StringBuilder sb, string title, Action body)
     {
+        Step(title);
         sb.AppendLine($"[{title}]");
         try
         {
