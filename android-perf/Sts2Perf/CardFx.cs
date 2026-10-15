@@ -21,20 +21,27 @@ namespace STS2Perf;
 // card_trails=off hides the trail drawn behind cards flying to a pile
 // (card_trail_*.tscn); frames ran at ~90 ms while a discarded hand flew off.
 //
-// Both apply to cards already on screen and to new ones as they appear.
+// bg_sway=off detaches the wind_sway shader from the background foliage, so
+// it stands still instead of being reshaded every frame.
+//
+// All apply to what's already on screen and to new nodes as they appear.
 internal static class CardFx
 {
     private const string CardScene = "card.tscn";
     private const string TrailPrefix = "card_trail";
+    private const string SwayShader = "wind_sway.gdshader";
 
     private static bool _hooked;
     private static bool _swept;
     private static bool _fastApplied;
     private static bool _trailsHidden;
+    private static bool _swayOff;
+    private static readonly List<CanvasItem> Sways = new();
     private static readonly List<CanvasGroup> Groups = new();
     private static readonly List<CanvasItem> Trails = new();
 
-    private static bool Wanted => PerfSettings.Value("card_fx") == "fast" || PerfSettings.Value("card_trails") == "off";
+    private static bool Wanted =>
+        PerfSettings.Value("card_fx") == "fast" || PerfSettings.Value("card_trails") == "off" || PerfSettings.Value("bg_sway") == "off";
 
     // From PerfRuntime.ApplyAll (every 2 s and on settings changes).
     public static void Apply(SceneTree tree)
@@ -61,8 +68,10 @@ internal static class CardFx
         }
         var fast = PerfSettings.Value("card_fx") == "fast";
         var hideTrails = PerfSettings.Value("card_trails") == "off";
+        var swayOff = PerfSettings.Value("bg_sway") == "off";
         Groups.RemoveAll(g => !GodotObject.IsInstanceValid(g));
         Trails.RemoveAll(t => !GodotObject.IsInstanceValid(t));
+        Sways.RemoveAll(s => !GodotObject.IsInstanceValid(s));
         // Re-applied every tick: a CanvasGroup resets its mode when the game
         // changes one of its properties. Untouched unless on, or just turned off.
         if (fast || _fastApplied)
@@ -71,10 +80,17 @@ internal static class CardFx
         if (hideTrails || _trailsHidden)
             foreach (var trail in Trails)
                 SetTrail(trail, !hideTrails);
-        if (fast != _fastApplied || hideTrails != _trailsHidden)
-            PerfEntry.Log($"cards: rendering {(fast ? "fast (no offscreen pass)" : "as the game")}, trails {(hideTrails ? "off" : "on")} ({Groups.Count} card groups, {Trails.Count} trails now, new ones as they appear)");
+        if (swayOff || _swayOff)
+            foreach (var sway in Sways)
+                SetSway(sway, !swayOff);
+        if (fast != _fastApplied || hideTrails != _trailsHidden || swayOff != _swayOff)
+            PerfEntry.Log(
+                $"visuals: cards {(fast ? "fast (no offscreen pass)" : "as the game")}, card trails {(hideTrails ? "off" : "on")}, background sway {(swayOff ? "off" : "on")}"
+                    + $" ({Groups.Count} card groups, {Trails.Count} trails, {Sways.Count} swaying layers now, new ones as they appear)"
+            );
         _fastApplied = fast;
         _trailsHidden = hideTrails;
+        _swayOff = swayOff;
         if (!Wanted)
         {
             tree.NodeAdded -= OnNodeAdded;
@@ -82,6 +98,7 @@ internal static class CardFx
             _swept = false;
             Groups.Clear();
             Trails.Clear();
+            Sways.Clear();
         }
     }
 
@@ -110,6 +127,13 @@ internal static class CardFx
             Trails.Add(item);
             if (_trailsHidden)
                 SetTrail(item, false);
+        }
+        else if (node is CanvasItem swaying && swaying.Material is ShaderMaterial { Shader: { } shader }
+                 && shader.ResourcePath.EndsWith(SwayShader, StringComparison.Ordinal))
+        {
+            Sways.Add(swaying);
+            if (_swayOff)
+                SetSway(swaying, false);
         }
     }
 
@@ -152,4 +176,7 @@ internal static class CardFx
 
     private static void SetTrail(CanvasItem trail, bool visible) =>
         RenderingServer.CanvasItemSetVisible(trail.GetCanvasItem(), visible && trail.Visible);
+
+    private static void SetSway(CanvasItem item, bool asGame) =>
+        RenderingServer.CanvasItemSetMaterial(item.GetCanvasItem(), asGame ? item.Material?.GetRid() ?? new Rid() : new Rid());
 }

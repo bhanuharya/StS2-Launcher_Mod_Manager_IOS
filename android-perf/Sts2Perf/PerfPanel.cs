@@ -1,4 +1,6 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using Godot;
 using HarmonyLib;
 using STS2Mobile.Launcher;
@@ -37,6 +39,7 @@ internal static class PerfPanel
         new("card_fx", "Card rendering", new Option[] { new("game", "As the game"), new("fast", "Fast (no ripple)") }),
         new("card_trails", "Card trails", new Option[] { new("on", "On"), new("off", "Off") }),
         new("idle_overlay", "Idle transition layer", new Option[] { new("draw", "Draw (game)"), new("skip", "Skip") }),
+        new("bg_sway", "Background sway", new Option[] { new("on", "On"), new("off", "Off (still)") }),
         new("frame_log", "Frame-time log", new Option[]
         {
             new("0", "Off"), new("5", "Every 5 s"), new("10", "Every 10 s"), new("30", "Every 30 s"),
@@ -44,6 +47,14 @@ internal static class PerfPanel
         new("jit_warmup", "JIT warm-up (experimental)", new Option[] { new("off", "Off"), new("on", "At main menu") }),
         new("probe", "Scene probe (once)", new Option[] { new("off", "Off"), new("next_fight", "Next fight"), new("spikes", "Slow moments") }),
     };
+
+    // "Lean visuals": everything that costs GPU time and shows little.
+    private static readonly (string Key, string Value)[] Lean =
+    {
+        ("card_fx", "fast"), ("card_trails", "off"), ("idle_overlay", "skip"), ("bg_sway", "off"), ("effects", "off"),
+    };
+
+    private static readonly List<(Row Row, StyledButton Button)> Buttons = new();
 
     public static void Apply(Harmony harmony)
     {
@@ -119,9 +130,22 @@ internal static class PerfPanel
             vbox.AddChild(scroll);
             TouchScroll.Attach(scroll);
 
+            var lean = new StyledButton("Lean visuals (one tap)", scale, fontSize: 14, height: 48, variant: ButtonVariant.Primary);
+            lean.Pressed += () =>
+            {
+                foreach (var (key, value) in Lean)
+                    PerfSettings.Set(key, value);
+                foreach (var (row, button) in Buttons)
+                    if (GodotObject.IsInstanceValid(button))
+                        button.Text = CurrentLabel(row);
+                PerfEntry.Log("Lean visuals: " + string.Join(", ", Lean.Select(l => $"{l.Key}={l.Value}")));
+            };
+            vbox.AddChild(lean);
+
             var rows = new VBoxContainer { SizeFlagsHorizontal = Control.SizeFlags.ExpandFill };
             rows.AddThemeConstantOverride("separation", (int)(8 * scale));
             scroll.AddChild(rows);
+            Buttons.Clear();
             foreach (var row in Rows)
                 AddRow(rows, row, scale);
 
@@ -173,6 +197,7 @@ internal static class PerfPanel
             button.Text = next.Label;
             PerfEntry.Log($"{row.Title}: {next.Label}");
         };
+        Buttons.Add((row, button));
         line.AddChild(button);
         rows.AddChild(line);
     }

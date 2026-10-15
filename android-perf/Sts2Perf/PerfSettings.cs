@@ -27,6 +27,7 @@ namespace STS2Perf;
 //   card_fx=game|fast           fast: cards draw without their offscreen
 //                               CanvasGroup pass (CardFx)
 //   card_trails=on|off          off: no trails behind flying cards
+//   bg_sway=on|off              off: background foliage stands still
 //   root.<property>=<value>     any property of the game's root Window
 //   engine.<property>=<value>   any property of Engine
 //
@@ -84,6 +85,7 @@ internal static class PerfSettings
             "card_fx" => Raw("card_fx") ?? "game",
             "card_trails" => Raw("card_trails") ?? "on",
             "idle_overlay" => Raw("idle_overlay") ?? "draw",
+            "bg_sway" => Raw("bg_sway") ?? "on",
             _ => Raw(key),
         };
     }
@@ -159,6 +161,7 @@ internal static class PerfSettings
             $"cards {Value("card_fx")}",
             $"card trails {Value("card_trails")}",
             $"idle overlay {Value("idle_overlay")}",
+            $"background sway {Value("bg_sway")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",
             $"probe {Value("probe")}",

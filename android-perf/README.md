@@ -24,7 +24,12 @@ Workshop, mods, Save Manager, cloud sync, LAN.
 
 Tap **Perf settings** (next to **Debug**, above the launcher's console). Each
 row's button steps through its values; changes are saved right away and apply
-when the game starts.
+when the game starts, or within 2 seconds while it runs.
+
+**Lean visuals (one tap)** at the top turns on everything below that costs GPU
+time and shows little: Card rendering Fast, Card trails Off, Idle transition
+layer Skip, Background sway Off, and HDR / FXAA / debanding Off. Particles
+and resolution stay as you set them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -36,6 +41,7 @@ when the game starts.
 | Card rendering | As the game, Fast | Fast draws each card straight to the screen instead of offscreen first. On a Pad 5 the cards in hand were half of a fight's GPU time. Loses the cards' ripple shader. |
 | Card trails | On, Off | Off hides the trail behind cards flying to a pile, where end-of-turn discards dropped to ~10 fps. |
 | Idle transition layer | Draw (game), Skip | Skip stops drawing the game's full-screen transition layer while it's idle and invisible (2.2 ms per frame at full resolution on a Pad 5). Transitions still show. |
+| Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
 | Scene probe (once) | Off, Next fight, Slow moments | Measures what each part of the fight screen costs the GPU, once, then turns itself off. Slow moments tests what's behind the next five slowdowns instead. See below. |
@@ -79,6 +85,7 @@ can switch settings mid-fight with no restart and no rebuild:
 | `card_fx` | `game`, `fast` | `game` |
 | `card_trails` | `on`, `off` | `on` |
 | `idle_overlay` | `draw`, `skip` | `draw` |
+| `bg_sway` | `on`, `off` | `on` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
 
