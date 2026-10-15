@@ -169,6 +169,7 @@ internal static class PerfRuntime
         Run("vsync", ApplyVsync);
         Run("particles", () => ApplyParticles(tree));
         Run("cards", () => CardFx.Apply(tree));
+        Run("idle overlay", () => OverlayFx.Apply(tree));
         Run("properties", () => ApplyProperties(root));
         if (_gameUiSeen)
         {

@@ -20,11 +20,14 @@ namespace STS2Perf;
 //                               line per hitch with its causes; 0 = off
 //   jit_warmup=off|on           on: compile the game's code at the main menu
 //                               (JitWarmup; experimental)
-//   probe=off|next_fight        next_fight: SceneProbe runs once in the next
-//                               fight, then sets this back to off
+//   probe=off|next_fight|spikes next_fight: SceneProbe runs once in the next
+//                               fight, then sets this back to off; spikes:
+//                               tests during the next five slowdowns
+//   idle_overlay=draw|skip      skip: don't draw the idle transition layer
 //   card_fx=game|fast           fast: cards draw without their offscreen
 //                               CanvasGroup pass (CardFx)
 //   card_trails=on|off          off: no trails behind flying cards
+//   bg_sway=on|off              off: background foliage stands still
 //   root.<property>=<value>     any property of the game's root Window
 //   engine.<property>=<value>   any property of Engine
 //
@@ -81,6 +84,8 @@ internal static class PerfSettings
             "probe" => Raw("probe") ?? "off",
             "card_fx" => Raw("card_fx") ?? "game",
             "card_trails" => Raw("card_trails") ?? "on",
+            "idle_overlay" => Raw("idle_overlay") ?? "draw",
+            "bg_sway" => Raw("bg_sway") ?? "on",
             _ => Raw(key),
         };
     }
@@ -155,6 +160,8 @@ internal static class PerfSettings
             $"particles {ParticlesPercent}%",
             $"cards {Value("card_fx")}",
             $"card trails {Value("card_trails")}",
+            $"idle overlay {Value("idle_overlay")}",
+            $"background sway {Value("bg_sway")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",
             $"probe {Value("probe")}",

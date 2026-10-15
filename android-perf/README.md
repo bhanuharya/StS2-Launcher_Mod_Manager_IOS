@@ -24,7 +24,12 @@ Workshop, mods, Save Manager, cloud sync, LAN.
 
 Tap **Perf settings** (next to **Debug**, above the launcher's console). Each
 row's button steps through its values; changes are saved right away and apply
-when the game starts.
+when the game starts, or within 2 seconds while it runs.
+
+**Lean visuals (one tap)** at the top turns on everything below that costs GPU
+time and shows little: Card rendering Fast, Card trails Off, Idle transition
+layer Skip, Background sway Off, and HDR / FXAA / debanding Off. Particles
+and resolution stay as you set them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -35,9 +40,11 @@ when the game starts.
 | Particles | 100%, 75%, 50%, 25%, Off | Scales how many particles every emitter spawns. |
 | Card rendering | As the game, Fast | Fast draws each card straight to the screen instead of offscreen first. On a Pad 5 the cards in hand were half of a fight's GPU time. Loses the cards' ripple shader. |
 | Card trails | On, Off | Off hides the trail behind cards flying to a pile, where end-of-turn discards dropped to ~10 fps. |
+| Idle transition layer | Draw (game), Skip | Skip stops drawing the game's full-screen transition layer while it's idle and invisible (2.2 ms per frame at full resolution on a Pad 5). Transitions still show. |
+| Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
-| Scene probe (once) | Off, Next fight | Measures what each part of the fight screen costs the GPU, once, then turns itself off. See below. |
+| Scene probe (once) | Off, Next fight, Slow moments | Measures what each part of the fight screen costs the GPU, once, then turns itself off. Slow moments tests what's behind the next five slowdowns instead. See below. |
 
 "Game setting" / 100% / Full / "As the game sets" leave the game exactly as
 upstream ships it, and turning a setting back restores the game's own value.
@@ -74,9 +81,11 @@ can switch settings mid-fight with no restart and no rebuild:
 | `particles` | `0`–`100` (percent) | `100` |
 | `frame_log` | seconds between stats lines, `0` = off | `0` |
 | `jit_warmup` | `off`, `on` | `off` |
-| `probe` | `off`, `next_fight` (runs once, then back to `off`) | `off` |
+| `probe` | `off`, `next_fight` (runs once, then back to `off`), `spikes` (the next five slowdowns) | `off` |
 | `card_fx` | `game`, `fast` | `game` |
 | `card_trails` | `on`, `off` | `on` |
+| `idle_overlay` | `draw`, `skip` | `draw` |
+| `bg_sway` | `on`, `off` | `on` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
 
@@ -166,11 +175,18 @@ it with the card_ripple shader. On a tile-based mobile GPU each offscreen
 pass costs about a full-screen read and write, so every card in hand costs
 ~1.8 ms per frame. **Card rendering → Fast** draws the cards' parts straight
 to the screen. The ripple effect goes, and while a card fades its parts can
-show through each other.
+show through each other. Measured on the same Pad 5 at full resolution: a
+fight's GPU time went from about 25 ms to 14–15 ms per frame, and the median
+frame from 30 to 60 fps.
 
 At the end of a turn, discarded cards fly to the pile with a trail, and
 frames ran at about 90 ms for 2–3 seconds. **Card trails → Off** hides the
 trails.
+
+Still open: at the start of the enemy turn (the banner, cards flying off) the
+GPU runs at about 89 ms per frame for 2–3 seconds, with nothing unusual in
+view. **Scene probe → Slow moments** hides one thing at a time while that
+happens and logs what the GPU time drops to.
 
 ### Scene probe: what the GPU spends its time on
 
@@ -193,7 +209,12 @@ seconds into the next fight (leave the screen alone for about a minute):
    transition overlay hidden.
 
 With the frame log on, a run of GPU frames over 60 ms also logs a `spike:`
-snapshot of what's on screen at that moment (up to 6 per session).
+snapshot of what's on screen at that moment, and what was added in the last
+5 seconds (up to 6 per session). With **Scene probe → Slow moments**, each of
+the next five slowdowns is also tested: while it lasts, things added in the
+last few seconds and then the biggest parts of the screen are hidden one at
+a time (`spike test: without enemy_turn_banner …: GPU 15.2 ms`). A test
+that the slowdown outlasted is logged as not conclusive.
 
 Then it switches itself off. Collect the log the same way as above
 (`[Perf] probe:` lines).
