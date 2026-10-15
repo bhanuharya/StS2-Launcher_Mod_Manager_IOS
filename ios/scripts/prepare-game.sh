@@ -12,12 +12,14 @@
 #   bootstrap/   files for the app's main pack: edited project.binary and the
 #                game's .godot metadata (uid cache, script class cache)
 #   app-extra/   files copied next to the app executable (release_info.json)
-#   game.env     PCK_SIZE and GAME_VERSION, for ios_boot's version check
+#   game.env     PCK_SIZE and GAME_VERSION, for ios_boot's version check,
+#                and PCK_REPACKED (1 if the textures were converted)
 #
 # Env: REPACK_ASTC=1 also converts the pck's BC textures to ASTC first
 # (Apple GPUs can't sample BC, so Godot would expand them to raw RGBA in
 # memory — about 4x the VRAM and slower loads). Needs astcenc on PATH and
 # `pip install texture2ddecoder`; skipped with a note when they're absent.
+# game.env's PCK_REPACKED says whether it ran.
 # REPACK_QUALITY overrides the astcenc effort (fast|medium|thorough|...).
 set -euo pipefail
 
@@ -36,9 +38,11 @@ DATA_DIR="$(find "$GAME_DIR" -maxdepth 1 -type d -name 'data_*' | head -1)"
 # BC -> ASTC texture conversion, before anything records the pck's size
 # (ios_boot checks PCK_SIZE, so the app and the repacked pck must ship
 # together — the workflow puts this pck inside the encrypted artifact).
+PCK_REPACKED=0
 if [ "${REPACK_ASTC:-0}" = "1" ]; then
     if command -v astcenc >/dev/null 2>&1 || command -v astcenc-avx2 >/dev/null 2>&1 \
-        || command -v astcenc-sse2 >/dev/null 2>&1 || command -v astcenc-neon >/dev/null 2>&1; then
+        || command -v astcenc-sse4.1 >/dev/null 2>&1 || command -v astcenc-sse2 >/dev/null 2>&1 \
+        || command -v astcenc-neon >/dev/null 2>&1; then
         ASTCENC_OK=1
     else
         ASTCENC_OK=0
@@ -52,6 +56,7 @@ if [ "${REPACK_ASTC:-0}" = "1" ]; then
             python3 "$IOS/tools/repack_astc.py" repack "$PCK" "$GAME_DIR/.repacked.pck"
         fi
         mv "$GAME_DIR/.repacked.pck" "$PCK"
+        PCK_REPACKED=1
     else
         log "NOTE: REPACK_ASTC=1 but astcenc/texture2ddecoder not found; keeping BC textures"
     fi
@@ -113,5 +118,5 @@ if [ -f "$GAME_DIR/release_info.json" ]; then
     GAME_VERSION="$(python3 -c 'import json,sys; d=json.load(open(sys.argv[1])); print(next((str(d[k]) for k in ("version","Version") if k in d), "unknown"))' "$GAME_DIR/release_info.json")"
 fi
 PCK_SIZE="$(python3 -c 'import os,sys; print(os.path.getsize(sys.argv[1]))' "$PCK")"
-printf 'PCK_SIZE=%s\nGAME_VERSION=%s\n' "$PCK_SIZE" "$GAME_VERSION" > "$WORK/game.env"
+printf 'PCK_SIZE=%s\nGAME_VERSION=%s\nPCK_REPACKED=%s\n' "$PCK_SIZE" "$GAME_VERSION" "$PCK_REPACKED" > "$WORK/game.env"
 log "Game version $GAME_VERSION, pck $PCK_SIZE bytes"

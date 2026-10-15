@@ -2,8 +2,9 @@ name: iOS update watch
 
 # README (ios/README.md, "Automatic builds on game updates"): once a day,
 # asks Steam — anonymously, no secrets — for the game's current public
-# build, and starts an "iOS game build" when it differs from the last one
-# that build recorded in the IOS_LAST_BUILDID repository variable.
+# build, and starts an "iOS game build" when no successful build of it is
+# on record. Each successful build uploads a steam-build-<branch>-<buildid>
+# artifact (kept 90 days) that this looks for.
 #
 # Needs the STEAM_REFRESH_TOKEN secret for the triggered build to sign in
 # by itself; without it this just posts a notice that a build is due.
@@ -20,7 +21,8 @@ on:
         default: false
 
 permissions:
-  actions: write # read/update IOS_LAST_BUILDID, dispatch the game build
+  contents: read # checkout
+  actions: write # list the build markers, start the game build
 
 env:
   STS2_APP_ID: "2868840"
@@ -53,24 +55,21 @@ jobs:
           FORCE: ${{ inputs.force_build }}
           CURRENT: ${{ steps.pics.outputs.buildid }}
         run: |
-          stored="$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/IOS_LAST_BUILDID" --jq .value 2>/dev/null || true)"
-          # stored as "branch:buildid" by the iOS game build on success
-          last_branch="${stored%%:*}"
-          last_build="${stored##*:}"
+          # Markers are per branch, so a manual beta build doesn't count here.
+          marker="steam-build-public-$CURRENT"
+          built="$(gh api "repos/$GITHUB_REPOSITORY/actions/artifacts?name=$marker&per_page=100" \
+            --jq '[.artifacts[] | select(.expired | not)] | length')"
           echo "Steam public build: $CURRENT"
-          echo "Last built: ${stored:-none}"
           if [ "$FORCE" = "true" ]; then
-            echo "forced" && echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif [ -z "$stored" ]; then
-            # Nothing recorded yet: build once so future changes are detectable.
+            echo "Forced."
             echo "changed=true" >> "$GITHUB_OUTPUT"
-          elif [ "$last_branch" = "public" ] && [ "$last_build" != "$CURRENT" ]; then
-            echo "changed=true" >> "$GITHUB_OUTPUT"
-          else
+          elif [ "$built" -gt 0 ]; then
+            echo "Already built ($marker)."
             echo "changed=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "Not built yet."
+            echo "changed=true" >> "$GITHUB_OUTPUT"
           fi
-          # A last build for another branch (a beta, say) is left alone:
-          # this watch tracks public only.
 
       - name: Start the iOS game build
         if: steps.cmp.outputs.changed == 'true'
@@ -85,4 +84,4 @@ jobs:
           fi
           gh workflow run ios-game.yml --ref "${{ github.ref_name }}" \
             -f source=steam -f steam_branch=public -f repack_astc=true
-          echo "iOS game build started for Steam build $CURRENT; it records it in IOS_LAST_BUILDID when it succeeds."
+          echo "iOS game build started for Steam build $CURRENT; it uploads steam-build-public-$CURRENT when it succeeds."

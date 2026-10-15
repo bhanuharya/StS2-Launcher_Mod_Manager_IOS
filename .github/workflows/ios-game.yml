@@ -49,9 +49,6 @@ permissions:
   contents: read
   # Steam Guard code requests (ios/tools/steam_guard_code.py).
   issues: write
-  # Records the built Steam build in the IOS_LAST_BUILDID variable, which
-  # the iOS update watch compares against (ios-update-watch.yml).
-  actions: write
 
 concurrency:
   group: ios-game-${{ github.ref }}-${{ github.event_name }}
@@ -62,9 +59,10 @@ env:
   GODOT_BASE_URL: https://github.com/godotengine/godot/releases/download/4.5.1-stable
   STS2_APP_ID: "2868840"
   SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source || 'fake' }}
-  # Push runs (fake game) get the default true, so the conversion self-test
-  # runs on every ios/** change.
-  REPACK_ASTC: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.repack_astc }}
+  # 1 = prepare-game.sh converts the pck's BC textures to ASTC. Push runs
+  # (fake game) always do, so the conversion self-test and the pck rebuild
+  # run on every ios/** change.
+  REPACK_ASTC: ${{ (github.event_name != 'workflow_dispatch' || inputs.repack_astc) && '1' || '0' }}
   REPACK_QUALITY: ${{ inputs.astc_quality || 'fast' }}
 
 jobs:
@@ -123,8 +121,8 @@ jobs:
             echo "::error::SlayTheSpire2.pck was not downloaded (wrong branch, or the account doesn't own the game?)"
             exit 1
           fi
-          # The Steam build this run is for, so the update watch (and the
-          # IOS_LAST_BUILDID recording below) know it.
+          # The Steam build this run is for, for the build marker below that
+          # the update watch looks for.
           dotnet "$RUNNER_TEMP/steamfetch/SteamFetch.dll" appinfo \
             --app "$STS2_APP_ID" --branch "${STEAM_BRANCH:-public}" > "$RUNNER_TEMP/appinfo.txt" || true
           cat "$RUNNER_TEMP/appinfo.txt"
@@ -219,16 +217,18 @@ jobs:
           # encryption, not compression.
           7z a -tzip -mem=AES256 -mx=1 -p"$IPA_PASSWORD" "upload/$NAME.zip" ./build/game/StS2.ipa > /dev/null
           rm -f build/game/StS2.ipa
-          if [ "$REPACK_ASTC" = "true" ]; then
-            # The converted pck goes with the app: ios_boot size-checks it
-            # against this build, so copy this one, not the PC's file.
+          echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
+          echo "### StS2.ipa built for game ${GAME_VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          if [ "$REPACK_ASTC" = "1" ]; then
+            # The pck goes with the app: ios_boot size-checks it against this
+            # build, so copy this one, not the PC's file.
             7z a -tzip -mem=AES256 -mx=1 -p"$IPA_PASSWORD" "upload/$NAME.zip" "$HOME/game/SlayTheSpire2.pck" > /dev/null
-            echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
-            echo "### StS2.ipa built for game ${GAME_VERSION}" >> "$GITHUB_STEP_SUMMARY"
-            echo "Copy **SlayTheSpire2.pck from this zip** (BC textures already converted to ASTC) into the app's folder." >> "$GITHUB_STEP_SUMMARY"
+            if [ "${PCK_REPACKED:-0}" = "1" ]; then
+              echo "Copy **SlayTheSpire2.pck from this zip** (BC textures converted to ASTC) into the app's folder." >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "Copy **SlayTheSpire2.pck from this zip** into the app's folder. Its textures were **not** converted (see the Build StS2.ipa log)." >> "$GITHUB_STEP_SUMMARY"
+            fi
           else
-            echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
-            echo "### StS2.ipa built for game ${GAME_VERSION}" >> "$GITHUB_STEP_SUMMARY"
             echo "Copy SlayTheSpire2.pck from your Steam install (${PCK_SIZE} bytes) into the app's folder." >> "$GITHUB_STEP_SUMMARY"
           fi
 
@@ -257,23 +257,28 @@ jobs:
           if-no-files-found: ignore
           retention-days: 7
 
-      - name: Record the built Steam build
-        # Only on success, so a failed build is retried by the watch the
-        # next day. Stored as "branch:buildid"; the watch compares the
-        # public branch's buildid.
-        if: env.SOURCE == 'steam'
+      # Marks this Steam build as built for the iOS update watch
+      # (ios-update-watch.yml): a tiny artifact named
+      # steam-build-<branch>-<buildid>, kept 90 days. Only on success, so the
+      # watch retries a failed build the next day. An artifact because
+      # GITHUB_TOKEN can't write repository variables.
+      - name: Mark the Steam build as built
+        if: env.SOURCE == 'steam' && env.STEAM_BUILDID != ''
         env:
-          GH_TOKEN: ${{ github.token }}
           STEAM_BRANCH: ${{ inputs.steam_branch || 'public' }}
         run: |
-          [ -n "$STEAM_BUILDID" ] || { echo "no STEAM_BUILDID captured; not recording"; exit 0; }
-          value="${STEAM_BRANCH:-public}:$STEAM_BUILDID"
-          if gh api "repos/$GITHUB_REPOSITORY/actions/variables/IOS_LAST_BUILDID" >/dev/null 2>&1; then
-            gh api -X PATCH "repos/$GITHUB_REPOSITORY/actions/variables/IOS_LAST_BUILDID" -f value="$value" >/dev/null
-          else
-            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/variables" -f name=IOS_LAST_BUILDID -f value="$value" >/dev/null
-          fi
-          echo "recorded $value in IOS_LAST_BUILDID"
+          branch="$(printf '%s' "$STEAM_BRANCH" | tr -c 'A-Za-z0-9._-' '_')"
+          mkdir -p "$RUNNER_TEMP/marker"
+          echo "$STEAM_BRANCH $STEAM_BUILDID" > "$RUNNER_TEMP/marker/steam-build.txt"
+          echo "MARKER_NAME=steam-build-$branch-$STEAM_BUILDID" >> "$GITHUB_ENV"
+
+      - name: Upload the build marker
+        if: env.MARKER_NAME != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.MARKER_NAME }}
+          path: ${{ runner.temp }}/marker/steam-build.txt
+          retention-days: 90
 
       - name: Remove game files
         if: always()
