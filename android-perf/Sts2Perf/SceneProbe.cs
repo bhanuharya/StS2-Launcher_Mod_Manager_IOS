@@ -9,24 +9,30 @@ namespace STS2Perf;
 // the next fight, logs what the screen is made of and what each part of it
 // costs the GPU, then switches itself back off.
 //
-// 1. Inventory, one walk of the tree, counting what is expensive to draw on
-//    a mobile GPU: visible items covering most of the screen (each one a
-//    full-screen fill), shader materials (and which read the screen, which
-//    forces a copy of it), CanvasGroups and clip masks (drawn offscreen
-//    first), 2D lights, SubViewports (a whole extra render each, with their
+// 1. Inventory, one walk of the tree, of what is expensive to draw on a
+//    mobile GPU: visible items covering most of the screen (each one a
+//    full-screen fill), shader materials (which read the screen, and their
+//    parameters), CanvasGroups and clip masks (drawn offscreen first, each
+//    listed), 2D lights, SubViewports (a whole extra render each, with their
 //    own GPU time), Spine skeletons; plus hidden nodes that still run code
 //    every frame.
 // 2. GPU bisect: hides the biggest visible branches one at a time through
 //    RenderingServer (the game's own visibility state and signals stay
 //    untouched) and measures the root viewport's GPU time without each.
-//    Parts of the screen blink out for a moment each, for about half a
-//    minute in all.
+// 3. Experiments: the same measurement with one candidate fix applied at a
+//    time (card CanvasGroups off, clip masks off, a shader removed, the
+//    background layers or the transition overlay hidden), to size each fix
+//    before it becomes a setting.
+// Parts of the screen blink or change for a moment each, for about a minute.
+//
+// Snapshot(), called by FrameLog when GPU frames spike, logs what is on
+// screen at that moment the same way, for slowdowns too short for the probe.
 internal static class SceneProbe
 {
     private const int BaselineFrames = 12;
     private const int SettleFrames = 6;
-    private const int HiddenFrames = 16;
-    private const int MaxCandidates = 18;
+    private const int MeasureFrames = 16;
+    private const int MaxBisect = 16;
     private const double FightSettleSeconds = 5;
 
     private sealed class Item
@@ -39,19 +45,18 @@ internal static class SceneProbe
         public bool FullScreen;
     }
 
-    private record Candidate(CanvasItem Node, string Label, int Nodes);
+    private sealed record Step(string Section, string Label, int Nodes, Action Apply, Action Undo);
 
     private static ulong _fightSeenUsec;
     private static bool _running;
-    private static List<Candidate> _candidates;
+    private static List<Step> _steps;
     private static int _index;
     private static int _frame;
-    private static bool _hidden;
+    private static bool _applied;
     private static readonly List<float> Samples = new();
-    private static readonly List<float> FrameSamples = new();
     private static float _baseline;
-    private static ulong _lastFrameUsec;
-    private static readonly List<(string Label, int Nodes, float Baseline, float Hidden)> Results = new();
+    private static float _firstBaseline;
+    private static readonly List<(Step Step, float Baseline, float With)> Results = new();
     private static List<Rid> _subViewports = new();
     private static List<string> _subViewportLabels = new();
 
@@ -71,7 +76,7 @@ internal static class SceneProbe
         if (_fightSeenUsec == 0)
         {
             _fightSeenUsec = now;
-            PerfEntry.Log($"probe: fight found, starting in {FightSettleSeconds:0} s (don't touch the screen for about 30 s)");
+            PerfEntry.Log($"probe: fight found, starting in {FightSettleSeconds:0} s (don't touch the screen for about a minute)");
             return;
         }
         if (now - _fightSeenUsec < FightSettleSeconds * 1_000_000)
@@ -100,8 +105,8 @@ internal static class SceneProbe
         try
         {
             var items = Walk(tree.Root);
-            Inventory(tree, items);
-            _candidates = PickCandidates(items);
+            Inventory(items, "probe");
+            _steps = Bisect(items).Concat(Experiments(items)).ToList();
         }
         catch (Exception ex)
         {
@@ -109,7 +114,7 @@ internal static class SceneProbe
             Finish();
             return;
         }
-        if (_candidates.Count == 0)
+        if (_steps.Count == 0)
         {
             Finish();
             return;
@@ -117,14 +122,15 @@ internal static class SceneProbe
         RenderingServer.ViewportSetMeasureRenderTime(tree.Root.GetViewportRid(), true);
         _index = -1;
         _frame = 0;
-        _hidden = false;
+        _applied = false;
+        _firstBaseline = 0;
         Samples.Clear();
-        FrameSamples.Clear();
         Results.Clear();
-        _lastFrameUsec = 0;
         tree.ProcessFrame += OnFrame;
-        PerfEntry.Log($"probe: GPU bisect over {_candidates.Count} parts of the screen");
+        PerfEntry.Log($"probe: measuring {_steps.Count} parts and fixes (settings now: {PerfSettings.Summary()})");
     }
+
+    // ---- inventory -------------------------------------------------------
 
     private static List<Item> Walk(Node root)
     {
@@ -145,7 +151,6 @@ internal static class SceneProbe
             }
             var index = items.Count;
             items.Add(item);
-            // SubViewports render on their own; their children aren't on this screen.
             foreach (var child in node.GetChildren())
                 stack.Push((child, index, depth + 1));
         }
@@ -181,95 +186,10 @@ internal static class SceneProbe
     {
         var scene = node.SceneFilePath;
         var file = string.IsNullOrEmpty(scene) ? "" : $", {scene[(scene.LastIndexOf('/') + 1)..]}";
-        var type = node.GetType() == typeof(GodotObject) || node.GetType().Namespace == "Godot" ? node.GetClass() : node.GetType().Name;
+        var type = node.GetType().Namespace == "Godot" ? node.GetClass() : node.GetType().Name;
         var parent = node.GetParent();
         var path = parent != null && parent.GetParent() != null ? $"{parent.Name}/{node.Name}" : node.Name.ToString();
         return $"{path} ({type}{file})";
-    }
-
-    private static void Inventory(SceneTree tree, List<Item> items)
-    {
-        var visible = 0;
-        var hiddenProcessing = new Dictionary<string, int>();
-        var shaders = new Dictionary<string, (int Count, bool ScreenRead)>();
-        var counts = new Dictionary<string, int>();
-        var fullScreen = new List<string>();
-        _subViewports = new List<Rid>();
-        _subViewportLabels = new List<string>();
-        void Count(string what) => counts[what] = counts.TryGetValue(what, out var n) ? n + 1 : 1;
-
-        foreach (var item in items)
-        {
-            var node = item.Node;
-            var cls = node.GetClass();
-            if (cls == "SpineSprite")
-                Count("Spine skeletons");
-            switch (node)
-            {
-                case SubViewport sub:
-                    _subViewports.Add(sub.GetViewportRid());
-                    _subViewportLabels.Add($"{Label(sub)} {sub.Size.X}x{sub.Size.Y} update {sub.RenderTargetUpdateMode}");
-                    RenderingServer.ViewportSetMeasureRenderTime(sub.GetViewportRid(), true);
-                    break;
-                case Light2D light when light.IsVisibleInTree():
-                    Count(light.ShadowEnabled ? "2D lights with shadows" : "2D lights");
-                    break;
-                case CanvasModulate:
-                    Count("CanvasModulate");
-                    break;
-            }
-            if (node is not CanvasItem ci)
-                continue;
-            if (!item.Visible)
-            {
-                if (node.IsProcessing() || node.IsPhysicsProcessing())
-                {
-                    var key = SceneOf(node);
-                    hiddenProcessing[key] = hiddenProcessing.TryGetValue(key, out var n) ? n + 1 : 1;
-                }
-                continue;
-            }
-            visible++;
-            if (ci is CanvasGroup)
-                Count("CanvasGroups (offscreen)");
-            if (ci is BackBufferCopy)
-                Count("BackBufferCopy (screen copies)");
-            if (ci.ClipChildren != CanvasItem.ClipChildrenMode.Disabled)
-                Count("clip masks (offscreen)");
-            if (ci is GpuParticles2D or CpuParticles2D)
-                Count("particle emitters");
-            if (ci.Material is ShaderMaterial { Shader: { } shader })
-            {
-                var key = string.IsNullOrEmpty(shader.ResourcePath) ? $"inline in {SceneOf(node)}" : shader.ResourcePath;
-                var code = shader.Code ?? "";
-                var screenRead = code.Contains("hint_screen_texture") || code.Contains("SCREEN_TEXTURE");
-                var had = shaders.TryGetValue(key, out var s) ? s : (0, false);
-                shaders[key] = (had.Item1 + 1, had.Item2 || screenRead);
-            }
-            if (item.FullScreen && fullScreen.Count < 25)
-                fullScreen.Add(Label(node) + (ci.Material != null ? " +material" : ""));
-        }
-
-        PerfEntry.Log(
-            $"probe: {items.Count} nodes, {visible} visible canvas items, {RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalDrawCallsInFrame)} draw calls"
-                + $" | {string.Join(", ", counts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}"))}"
-        );
-        PerfEntry.Log($"probe: {fullScreen.Count} visible items cover half the screen or more (each a full-screen fill): {string.Join("; ", fullScreen)}");
-        PerfEntry.Log(
-            $"probe: shaders on visible items: "
-                + string.Join("; ", shaders.OrderByDescending(kv => kv.Value.Count).Take(20).Select(kv => $"{kv.Key} x{kv.Value.Count}{(kv.Value.ScreenRead ? " (reads the screen)" : "")}"))
-        );
-        PerfEntry.Log(
-            $"probe: hidden but running code every frame: {hiddenProcessing.Values.Sum()} nodes ("
-                + string.Join(", ", hiddenProcessing.OrderByDescending(kv => kv.Value).Take(10).Select(kv => $"{kv.Key} x{kv.Value}"))
-                + ")"
-        );
-        PerfEntry.Log($"probe: {_subViewports.Count} SubViewports: {string.Join("; ", _subViewportLabels)}");
-        PerfEntry.Log(
-            "probe: top of the tree: "
-                + string.Join("; ", items.Where(i => i.Depth is >= 2 and <= 4 && i.Subtree >= 30).OrderByDescending(i => i.Subtree).Take(20)
-                    .Select(i => $"{Label(i.Node)} {i.Subtree} nodes{(i.Visible ? "" : " hidden")}"))
-        );
     }
 
     // The node's own scene file, or the nearest ancestor's.
@@ -288,10 +208,144 @@ internal static class SceneProbe
         return node.GetClass();
     }
 
+    private static string ShaderPath(Shader shader, Node owner) =>
+        string.IsNullOrEmpty(shader.ResourcePath) ? $"inline in {SceneOf(owner)}" : shader.ResourcePath;
+
+    private static bool ReadsScreen(Shader shader)
+    {
+        var code = shader.Code ?? "";
+        return code.Contains("hint_screen_texture") || code.Contains("SCREEN_TEXTURE");
+    }
+
+    // "name=value" for a material's non-texture parameters.
+    private static string Parameters(ShaderMaterial material)
+    {
+        var parts = new List<string>();
+        foreach (var uniform in material.Shader.GetShaderUniformList())
+        {
+            var name = uniform.AsGodotDictionary()["name"].AsString();
+            var value = material.GetShaderParameter(name);
+            parts.Add(value.VariantType == Variant.Type.Object ? $"{name}=<texture>" : $"{name}={value}");
+            if (parts.Count >= 12)
+                break;
+        }
+        return string.Join(" ", parts);
+    }
+
+    private static void Inventory(List<Item> items, string tag)
+    {
+        var visible = 0;
+        var hiddenProcessing = new Dictionary<string, int>();
+        var shaders = new Dictionary<string, (int Count, bool ScreenRead, string Example)>();
+        var counts = new Dictionary<string, int>();
+        var fullScreen = new List<string>();
+        var groups = new List<string>();
+        var clips = new List<string>();
+        var visibleScenes = new Dictionary<string, int>();
+        _subViewports = new List<Rid>();
+        _subViewportLabels = new List<string>();
+        void Count(string what) => counts[what] = counts.TryGetValue(what, out var n) ? n + 1 : 1;
+
+        foreach (var item in items)
+        {
+            var node = item.Node;
+            if (node.GetClass() == "SpineSprite" && item.Visible)
+                Count("Spine skeletons");
+            switch (node)
+            {
+                case SubViewport sub:
+                    _subViewports.Add(sub.GetViewportRid());
+                    _subViewportLabels.Add($"{Label(sub)} {sub.Size.X}x{sub.Size.Y} update {sub.RenderTargetUpdateMode}");
+                    RenderingServer.ViewportSetMeasureRenderTime(sub.GetViewportRid(), true);
+                    break;
+                case Light2D light when light.IsVisibleInTree():
+                    Count(light.ShadowEnabled ? "2D lights with shadows" : "2D lights");
+                    break;
+            }
+            if (node is not CanvasItem ci)
+                continue;
+            if (!item.Visible)
+            {
+                if (node.IsProcessing() || node.IsPhysicsProcessing())
+                {
+                    var key = SceneOf(node);
+                    hiddenProcessing[key] = hiddenProcessing.TryGetValue(key, out var n) ? n + 1 : 1;
+                }
+                continue;
+            }
+            visible++;
+            if (!string.IsNullOrEmpty(node.SceneFilePath))
+            {
+                var scene = SceneOf(node);
+                visibleScenes[scene] = visibleScenes.TryGetValue(scene, out var n) ? n + 1 : 1;
+            }
+            if (ci is CanvasGroup cg)
+            {
+                Count("CanvasGroups (offscreen)");
+                if (groups.Count < 12)
+                    groups.Add($"{Label(cg)} in {SceneOf(cg.GetParent() ?? cg)}{(cg.UseMipmaps ? " +mipmaps" : "")}{(cg.Material is ShaderMaterial { Shader: { } s } ? $" shader {ShaderPath(s, cg)}" : "")}");
+            }
+            if (ci is BackBufferCopy)
+                Count("BackBufferCopy (screen copies)");
+            if (ci.ClipChildren != CanvasItem.ClipChildrenMode.Disabled)
+            {
+                Count("clip masks (offscreen)");
+                if (clips.Count < 12)
+                    clips.Add($"{Label(ci)} in {SceneOf(ci.GetParent() ?? ci)} {ci.ClipChildren}");
+            }
+            if (ci is GpuParticles2D or CpuParticles2D)
+                Count("particle emitters");
+            if (ci.Material is ShaderMaterial { Shader: { } shader } material)
+            {
+                var key = ShaderPath(shader, node);
+                if (shaders.TryGetValue(key, out var s))
+                    shaders[key] = (s.Count + 1, s.ScreenRead, s.Example);
+                else
+                    shaders[key] = (1, ReadsScreen(shader), $"{Label(node)}: {Parameters(material)}");
+            }
+            if (item.FullScreen && fullScreen.Count < 25)
+                fullScreen.Add(Label(node) + (ci.Material != null ? " +material" : ""));
+        }
+
+        PerfEntry.Log(
+            $"{tag}: {items.Count} nodes, {visible} visible canvas items, {RenderingServer.GetRenderingInfo(RenderingServer.RenderingInfo.TotalDrawCallsInFrame)} draw calls"
+                + $" | {string.Join(", ", counts.OrderByDescending(kv => kv.Value).Select(kv => $"{kv.Key} {kv.Value}"))}"
+        );
+        PerfEntry.Log($"{tag}: visible scenes: {string.Join(", ", visibleScenes.OrderByDescending(kv => kv.Value).Take(25).Select(kv => $"{kv.Key} x{kv.Value}"))}");
+        PerfEntry.Log($"{tag}: CanvasGroups: {string.Join("; ", groups)}");
+        PerfEntry.Log($"{tag}: clip masks: {string.Join("; ", clips)}");
+        PerfEntry.Log($"{tag}: {fullScreen.Count} visible items cover half the screen or more: {string.Join("; ", fullScreen)}");
+        foreach (var (path, s) in shaders.OrderByDescending(kv => kv.Value.Count).Take(12))
+            PerfEntry.Log($"{tag}: shader {path} x{s.Count}{(s.ScreenRead ? " (reads the screen)" : "")}, e.g. {s.Example}");
+        if (tag != "probe")
+            return;
+        PerfEntry.Log(
+            $"{tag}: hidden but running code every frame: {hiddenProcessing.Values.Sum()} nodes ("
+                + string.Join(", ", hiddenProcessing.OrderByDescending(kv => kv.Value).Take(10).Select(kv => $"{kv.Key} x{kv.Value}"))
+                + ")"
+        );
+        PerfEntry.Log($"{tag}: {_subViewports.Count} SubViewports: {string.Join("; ", _subViewportLabels)}");
+    }
+
+    // ---- what to measure -------------------------------------------------
+
+    private static Step Hide(string section, CanvasItem node, string label, int nodes) =>
+        new(section, label, nodes,
+            () => RenderingServer.CanvasItemSetVisible(node.GetCanvasItem(), false),
+            () =>
+            {
+                if (GodotObject.IsInstanceValid(node))
+                    RenderingServer.CanvasItemSetVisible(node.GetCanvasItem(), node.Visible);
+            });
+
+    private static Step Batch(string label, List<CanvasItem> nodes, Action<CanvasItem> apply, Action<CanvasItem> undo) =>
+        new("fix", $"{label} ({nodes.Count} items)", nodes.Count,
+            () => { foreach (var n in nodes) if (GodotObject.IsInstanceValid(n)) apply(n); },
+            () => { foreach (var n in nodes) if (GodotObject.IsInstanceValid(n)) undo(n); });
+
     // The biggest visible branches, skipping wrappers that hold nearly the
-    // same nodes as a branch already picked, plus every full-screen item and
-    // the player's hand.
-    private static List<Candidate> PickCandidates(List<Item> items)
+    // same nodes as a branch already picked, plus the player's hand.
+    private static IEnumerable<Step> Bisect(List<Item> items)
     {
         var total = items.Count;
         var picked = new List<int>();
@@ -306,93 +360,129 @@ internal static class SceneProbe
 
         foreach (var i in Enumerable.Range(0, items.Count).Where(i => Usable(i) && items[i].Subtree >= 10).OrderByDescending(i => items[i].Subtree))
         {
-            if (picked.Count >= MaxCandidates - 4)
+            if (picked.Count >= MaxBisect - 1)
                 break;
             if (!Covered(i))
                 picked.Add(i);
         }
-        foreach (var i in Enumerable.Range(0, items.Count).Where(i => Usable(i) && (items[i].FullScreen || items[i].Node.GetType().Name == "NPlayerHand")))
-        {
-            if (picked.Count >= MaxCandidates)
-                break;
+        foreach (var i in Enumerable.Range(0, items.Count).Where(i => Usable(i) && items[i].Node.GetType().Name == "NPlayerHand"))
             if (!picked.Contains(i))
                 picked.Add(i);
-        }
-        return picked.Select(i => new Candidate((CanvasItem)items[i].Node, Label(items[i].Node), items[i].Subtree)).ToList();
+        return picked.Select(i => Hide("part", (CanvasItem)items[i].Node, Label(items[i].Node), items[i].Subtree));
     }
+
+    private static IEnumerable<Step> Experiments(List<Item> items)
+    {
+        var visible = items.Where(i => i.Visible && i.Node is CanvasItem).Select(i => (CanvasItem)i.Node).ToList();
+
+        var cardGroups = visible.OfType<CanvasGroup>().Where(CardFx.InCard).Cast<CanvasItem>().ToList();
+        if (cardGroups.Count > 0)
+            yield return Batch("card CanvasGroups drawn directly (card_fx=fast)", cardGroups,
+                n => CardFx.SetGroup((CanvasGroup)n, false),
+                n => CardFx.SetGroup((CanvasGroup)n, PerfSettings.Value("card_fx") != "fast"));
+
+        var otherGroups = visible.OfType<CanvasGroup>().Where(g => !CardFx.InCard(g)).Cast<CanvasItem>().ToList();
+        if (otherGroups.Count > 0)
+            yield return Batch("other CanvasGroups drawn directly", otherGroups,
+                n => RenderingServer.CanvasItemSetCanvasGroupMode(n.GetCanvasItem(), RenderingServer.CanvasGroupMode.Disabled),
+                n => { var g = (CanvasGroup)n; RenderingServer.CanvasItemSetCanvasGroupMode(g.GetCanvasItem(), RenderingServer.CanvasGroupMode.Transparent, g.ClearMargin, true, g.FitMargin, g.UseMipmaps); });
+
+        var clips = visible.Where(n => n.ClipChildren != CanvasItem.ClipChildrenMode.Disabled).ToList();
+        if (clips.Count > 0)
+            yield return Batch("clip masks off", clips,
+                n => RenderingServer.CanvasItemSetCanvasGroupMode(n.GetCanvasItem(), RenderingServer.CanvasGroupMode.Disabled),
+                n => RenderingServer.CanvasItemSetCanvasGroupMode(n.GetCanvasItem(), (RenderingServer.CanvasGroupMode)(int)n.ClipChildren));
+
+        foreach (var shader in visible.Select(n => n.Material).OfType<ShaderMaterial>().Where(m => m.Shader != null)
+                     .GroupBy(m => m.Shader).OrderByDescending(g => g.Count()).Take(4))
+        {
+            var users = visible.Where(n => n.Material is ShaderMaterial m && m.Shader == shader.Key).ToList();
+            var name = string.IsNullOrEmpty(shader.Key.ResourcePath) ? "an inline shader" : shader.Key.ResourcePath[(shader.Key.ResourcePath.LastIndexOf('/') + 1)..];
+            yield return Batch($"{name} removed", users,
+                n => RenderingServer.CanvasItemSetMaterial(n.GetCanvasItem(), new Rid()),
+                n => RenderingServer.CanvasItemSetMaterial(n.GetCanvasItem(), n.Material?.GetRid() ?? new Rid()));
+        }
+
+        var layers = items.Where(i => i.FullScreen && i.Node is TextureRect && !string.IsNullOrEmpty(i.Node.SceneFilePath)).Select(i => (CanvasItem)i.Node).ToList();
+        if (layers.Count > 0)
+            yield return Batch("background layers hidden", layers,
+                n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), false),
+                n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), n.Visible));
+        foreach (var layer in layers)
+            yield return Hide("layer", layer, Label(layer), 1);
+
+        var transitions = visible.Where(n => n.GetType().Name == "NTransition").ToList();
+        if (transitions.Count > 0)
+            yield return Batch("transition overlay hidden", transitions,
+                n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), false),
+                n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), n.Visible));
+    }
+
+    // ---- measuring -------------------------------------------------------
 
     private static void OnFrame()
     {
         try
         {
-            Step();
+            Step_();
         }
         catch (Exception ex)
         {
             PerfEntry.Log($"probe failed: {ex.Message}");
-            Restore();
+            Undo();
             Finish();
         }
     }
 
-    private static void Step()
+    private static void Step_()
     {
         var tree = (SceneTree)Engine.GetMainLoop();
-        var now = Time.GetTicksUsec();
-        var frameMs = _lastFrameUsec == 0 ? 0 : (now - _lastFrameUsec) / 1000f;
-        _lastFrameUsec = now;
         var gpu = (float)RenderingServer.ViewportGetMeasuredRenderTimeGpu(tree.Root.GetViewportRid());
         _frame++;
 
-        if (!_hidden)
+        if (!_applied)
         {
-            // Measuring the baseline before the next candidate.
+            // The baseline right before the next step.
             if (_frame > 2)
                 Samples.Add(gpu);
             if (_frame < BaselineFrames)
                 return;
             _baseline = Median(Samples);
             if (_index == -1)
+            {
+                _firstBaseline = _baseline;
                 LogSubViewports();
+            }
             Samples.Clear();
-            FrameSamples.Clear();
             _index++;
-            while (_index < _candidates.Count && !GodotObject.IsInstanceValid(_candidates[_index].Node))
-                _index++;
-            if (_index >= _candidates.Count)
+            if (_index >= _steps.Count)
             {
                 Report();
                 Finish();
                 return;
             }
-            RenderingServer.CanvasItemSetVisible(_candidates[_index].Node.GetCanvasItem(), false);
-            _hidden = true;
+            _steps[_index].Apply();
+            _applied = true;
             _frame = 0;
             return;
         }
 
         if (_frame > SettleFrames)
-        {
             Samples.Add(gpu);
-            FrameSamples.Add(frameMs);
-        }
-        if (_frame < SettleFrames + HiddenFrames)
+        if (_frame < SettleFrames + MeasureFrames)
             return;
-        var candidate = _candidates[_index];
-        Results.Add((candidate.Label, candidate.Nodes, _baseline, Median(Samples)));
-        Restore();
+        Results.Add((_steps[_index], _baseline, Median(Samples)));
+        Undo();
         Samples.Clear();
         _frame = 0;
     }
 
-    private static void Restore()
+    private static void Undo()
     {
-        if (!_hidden || _candidates == null || _index < 0 || _index >= _candidates.Count)
+        if (!_applied || _steps == null || _index < 0 || _index >= _steps.Count)
             return;
-        var node = _candidates[_index].Node;
-        if (GodotObject.IsInstanceValid(node))
-            RenderingServer.CanvasItemSetVisible(node.GetCanvasItem(), node.Visible);
-        _hidden = false;
+        _steps[_index].Undo();
+        _applied = false;
     }
 
     private static void LogSubViewports()
@@ -407,9 +497,16 @@ internal static class SceneProbe
 
     private static void Report()
     {
-        PerfEntry.Log($"probe: screen GPU time {Results.FirstOrDefault().Baseline:0.0} ms per frame; hiding each part:");
-        foreach (var r in Results.OrderByDescending(r => r.Baseline - r.Hidden))
-            PerfEntry.Log($"probe:   {r.Baseline - r.Hidden,5:+0.0;-0.0} ms saved without {r.Label}, {r.Nodes} nodes ({r.Baseline:0.0} -> {r.Hidden:0.0})");
+        PerfEntry.Log($"probe: screen GPU time {_firstBaseline:0.0} ms per frame");
+        foreach (var section in new[] { ("part", "hiding each part"), ("layer", "hiding each background layer"), ("fix", "candidate fixes") })
+        {
+            var rows = Results.Where(r => r.Step.Section == section.Item1).OrderByDescending(r => r.Baseline - r.With).ToList();
+            if (rows.Count == 0)
+                continue;
+            PerfEntry.Log($"probe: {section.Item2}:");
+            foreach (var r in rows)
+                PerfEntry.Log($"probe:   {r.Baseline - r.With,5:+0.0;-0.0} ms: {r.Step.Label}{(r.Step.Section == "part" ? $", {r.Step.Nodes} nodes" : "")} ({r.Baseline:0.0} -> {r.With:0.0})");
+        }
     }
 
     private static void Finish()
@@ -424,7 +521,7 @@ internal static class SceneProbe
             RenderingServer.ViewportSetMeasureRenderTime(rid, false);
         _running = false;
         _fightSeenUsec = 0;
-        _candidates = null;
+        _steps = null;
         PerfSettings.Set("probe", "off");
         PerfEntry.Log("probe: done, Scene probe is off again");
     }
@@ -435,5 +532,30 @@ internal static class SceneProbe
             return 0;
         var sorted = values.OrderBy(v => v).ToList();
         return sorted[sorted.Count / 2];
+    }
+
+    // ---- spikes ----------------------------------------------------------
+
+    private static int _snapshots;
+    private static ulong _lastSnapshotUsec;
+
+    // From FrameLog when the GPU has been slow for a few frames in a row:
+    // what's on screen right now. A few per session, 10 s apart.
+    public static void Snapshot(float gpuMs)
+    {
+        var now = Time.GetTicksUsec();
+        if (_running || _snapshots >= 6 || (_lastSnapshotUsec != 0 && now - _lastSnapshotUsec < 10_000_000))
+            return;
+        _snapshots++;
+        _lastSnapshotUsec = now;
+        try
+        {
+            PerfEntry.Log($"spike: GPU {gpuMs:0} ms per frame for several frames; on screen now:");
+            Inventory(Walk(((SceneTree)Engine.GetMainLoop()).Root), "spike");
+        }
+        catch (Exception ex)
+        {
+            PerfEntry.Log($"spike snapshot failed: {ex.Message}");
+        }
     }
 }

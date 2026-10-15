@@ -168,6 +168,7 @@ internal static class PerfRuntime
         Run("fps cap", ApplyMaxFps);
         Run("vsync", ApplyVsync);
         Run("particles", () => ApplyParticles(tree));
+        Run("cards", () => CardFx.Apply(tree));
         Run("properties", () => ApplyProperties(root));
         if (_gameUiSeen)
         {

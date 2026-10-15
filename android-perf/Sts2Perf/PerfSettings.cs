@@ -22,6 +22,9 @@ namespace STS2Perf;
 //                               (JitWarmup; experimental)
 //   probe=off|next_fight        next_fight: SceneProbe runs once in the next
 //                               fight, then sets this back to off
+//   card_fx=game|fast           fast: cards draw without their offscreen
+//                               CanvasGroup pass (CardFx)
+//   card_trails=on|off          off: no trails behind flying cards
 //   root.<property>=<value>     any property of the game's root Window
 //   engine.<property>=<value>   any property of Engine
 //
@@ -76,6 +79,8 @@ internal static class PerfSettings
             "frame_log" => Raw("frame_log") ?? "0",
             "jit_warmup" => Raw("jit_warmup") ?? "off",
             "probe" => Raw("probe") ?? "off",
+            "card_fx" => Raw("card_fx") ?? "game",
+            "card_trails" => Raw("card_trails") ?? "on",
             _ => Raw(key),
         };
     }
@@ -148,6 +153,8 @@ internal static class PerfSettings
             $"fps cap {(MaxFps > 0 ? MaxFps.ToString() : "game")}",
             $"vsync {Vsync}",
             $"particles {ParticlesPercent}%",
+            $"cards {Value("card_fx")}",
+            $"card trails {Value("card_trails")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",
             $"probe {Value("probe")}",
