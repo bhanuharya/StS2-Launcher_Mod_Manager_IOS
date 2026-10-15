@@ -168,7 +168,9 @@ When Steam updates the game, a new build is needed (the app checks that the
 `.pck` matches it). With the `STEAM_REFRESH_TOKEN` secret set, that happens
 by itself: the **iOS update watch** workflow asks Steam — anonymously, once
 a day — for the game's current public build, and starts an **iOS game
-build** when it differs from the last one that succeeded. The next morning
+build** when that Steam build hasn't been built successfully yet (each
+successful build leaves a small `steam-build-public-<buildid>` artifact,
+kept 90 days, that the watch looks for). The next morning
 there's a fresh artifact to sideload, with the matching
 `SlayTheSpire2.pck` inside. A build that fails isn't recorded, so the watch
 tries again the next day; it only tracks the **public** branch (a manual
@@ -262,8 +264,8 @@ Steam (your account) ──► data_*/sts2.dll + deps, SlayTheSpire2.pck (CI onl
 ```
 
 `scripts/rehearse-linux.sh` runs the whole chain on Linux against the
-stand-in game in `test/` and boots it in the stock Godot template. The
-texture conversion runs in it too when its tools are installed
-(`pip install texture2ddecoder` plus an [astcenc](https://github.com/ARM-software/astc-encoder)
-binary on PATH); otherwise it is skipped with a note. Pushes to
+stand-in game in `test/` and boots it in the stock Godot template. Run it
+with `REPACK_ASTC=1` to include the texture conversion (needs
+`pip install texture2ddecoder` plus an [astcenc](https://github.com/ARM-software/astc-encoder)
+binary on PATH; without them it is skipped with a note). Pushes to
 `ios/**` run the macOS/iOS build of the stand-in game in CI.
