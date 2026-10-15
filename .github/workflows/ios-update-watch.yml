@@ -1,0 +1,88 @@
+name: iOS update watch
+
+# README (ios/README.md, "Automatic builds on game updates"): once a day,
+# asks Steam — anonymously, no secrets — for the game's current public
+# build, and starts an "iOS game build" when it differs from the last one
+# that build recorded in the IOS_LAST_BUILDID repository variable.
+#
+# Needs the STEAM_REFRESH_TOKEN secret for the triggered build to sign in
+# by itself; without it this just posts a notice that a build is due.
+# Manual runs can force a build with the force_build input.
+
+on:
+  schedule:
+    - cron: "23 4 * * *" # daily, quiet UTC hour
+  workflow_dispatch:
+    inputs:
+      force_build:
+        description: "Run the iOS build even if Steam's build is unchanged"
+        type: boolean
+        default: false
+
+permissions:
+  actions: write # read/update IOS_LAST_BUILDID, dispatch the game build
+
+env:
+  STS2_APP_ID: "2868840"
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Ask Steam for the game's current build
+        id: pics
+        run: |
+          dotnet build ios/tools/SteamFetch -c Release -o "$RUNNER_TEMP/steamfetch" -v quiet -nologo
+          dotnet "$RUNNER_TEMP/steamfetch/SteamFetch.dll" appinfo --app "$STS2_APP_ID" > "$RUNNER_TEMP/appinfo.txt"
+          cat "$RUNNER_TEMP/appinfo.txt"
+          buildid="$(sed -n 's/^buildid=//p' "$RUNNER_TEMP/appinfo.txt" | head -1)"
+          [ -n "$buildid" ] || { echo "::error::Steam returned no buildid"; exit 1; }
+          echo "buildid=$buildid" >> "$GITHUB_OUTPUT"
+
+      - name: Compare with the last built one
+        id: cmp
+        env:
+          GH_TOKEN: ${{ github.token }}
+          FORCE: ${{ inputs.force_build }}
+          CURRENT: ${{ steps.pics.outputs.buildid }}
+        run: |
+          stored="$(gh api "repos/$GITHUB_REPOSITORY/actions/variables/IOS_LAST_BUILDID" --jq .value 2>/dev/null || true)"
+          # stored as "branch:buildid" by the iOS game build on success
+          last_branch="${stored%%:*}"
+          last_build="${stored##*:}"
+          echo "Steam public build: $CURRENT"
+          echo "Last built: ${stored:-none}"
+          if [ "$FORCE" = "true" ]; then
+            echo "forced" && echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ -z "$stored" ]; then
+            # Nothing recorded yet: build once so future changes are detectable.
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          elif [ "$last_branch" = "public" ] && [ "$last_build" != "$CURRENT" ]; then
+            echo "changed=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "changed=false" >> "$GITHUB_OUTPUT"
+          fi
+          # A last build for another branch (a beta, say) is left alone:
+          # this watch tracks public only.
+
+      - name: Start the iOS game build
+        if: steps.cmp.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STEAM_REFRESH_TOKEN: ${{ secrets.STEAM_REFRESH_TOKEN }}
+          CURRENT: ${{ steps.pics.outputs.buildid }}
+        run: |
+          if [ -z "$STEAM_REFRESH_TOKEN" ]; then
+            echo "::notice::Steam build $CURRENT is newer than the last one built, but there is no STEAM_REFRESH_TOKEN secret, so the build cannot sign in by itself. Add it (ios/README.md) or run 'iOS game build' manually."
+            exit 0
+          fi
+          gh workflow run ios-game.yml --ref "${{ github.ref_name }}" \
+            -f source=steam -f steam_branch=public -f repack_astc=true
+          echo "iOS game build started for Steam build $CURRENT; it records it in IOS_LAST_BUILDID when it succeeds."

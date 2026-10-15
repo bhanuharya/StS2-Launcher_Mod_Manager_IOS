@@ -33,6 +33,7 @@ when the game starts.
 | FPS cap | Game setting, 30, 40, 45, 60, 90, 120 | Overrides the game's FPS limit. Pick a divisor of the display's refresh rate (40 or 60 on 120 Hz) for even pacing. |
 | VSync | Game setting, On, Off, Adaptive, Mailbox | Overrides the game's vsync. |
 | Particles | 100%, 75%, 50%, 25%, Off | Scales how many particles every emitter spawns. |
+| GC latency | Game setting, Low latency | SustainedLowLatency: gen2 garbage collections stop sweeping in the background instead of blocking, trading a little memory for fewer long hitches. Try it when the log shows GC pauses lining up with hitches. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | See below. |
 
 "Game setting" / 100% / Full / "As the game sets" leave the game exactly as
@@ -68,6 +69,7 @@ can switch settings mid-fight with no restart and no rebuild:
 | `max_fps` | `0` (game setting) or a number | `0` |
 | `vsync` | `game`, `on`, `off`, `adaptive`, `mailbox` | `game` |
 | `particles` | `0`–`100` (percent) | `100` |
+| `gc` | `game`, `low` (SustainedLowLatency) | `game` |
 | `frame_log` | seconds between stats lines, `0` = off | `0` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
@@ -91,11 +93,14 @@ Every change is logged (`[Perf] settings changed: …`, then what was applied),
 and with `frame_log` set, a line like this every N seconds:
 
 ```
-[Perf] frames 10s: 59.8 fps | ms p50 16.7 p95 17.9 p99 24.1 max 41.3 | hitches 3 | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full | effects on (hdr2d off) | particles 100%
+[Perf] frames 10s: 59.8 fps | ms p50 16.7 p95 17.9 p99 24.1 max 41.3 | hitches 3 | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full | effects on (hdr2d off) | particles 100% | gc g0 +14 g1 +1 g2 +0 paused 3 ms
 ```
 
 Frame times are the game's main-loop iterations, which on Android is also the
-render thread. `hitches` counts frames slower than 1.5× the median. Android
+render thread. `hitches` counts frames slower than 1.5× the median. The `gc`
+part is .NET collections and total GC pause during the window: hitches that
+line up with a `g2 +1` and a pause are the garbage collector (try
+**GC latency → Low latency**), the rest are GPU or loading work. Android
 can't time this app's frames from outside (its SurfaceView has no per-frame
 latency data), so this is the way to compare settings.
 
@@ -126,6 +131,53 @@ restorecon -R $NEW
 ```
 
 The first start after that rebuilds the texture cache (30–60 s).
+
+## ASTC textures for non-Adreno GPUs (optional, PC + rooted device)
+
+The game data Steam ships is made for PCs: its textures are BC-compressed.
+Snapdragon's Adreno GPUs read BC natively, but **Mali** (Samsung Exynos,
+MediaTek) and **PowerVR** GPUs cannot, so on those devices Godot expands
+every texture to raw RGBA in memory — around 4x the texture memory, slower
+loads, and more hitching. `ios/tools/repack_astc.py` (shared with the iOS
+port) converts the pack's BC textures to **ASTC**, the format those GPUs
+sample natively, at the same size.
+
+On the PC (macOS, Linux, or Windows through WSL — like the signing-key
+steps below) with the game installed:
+
+```bash
+pip install texture2ddecoder
+# astcenc: download a binary from
+# https://github.com/ARM-software/astc-encoder/releases and put it on PATH
+python3 ios/tools/repack_astc.py selftest                      # toolchain check
+python3 ios/tools/repack_astc.py repack "…/Slay the Spire 2/SlayTheSpire2.pck" StS2-astc.pck
+```
+
+`--dry-run` lists what would convert; `--block 8x8` shrinks textures to a
+quarter of BC's size for very low-memory devices, at a visible quality cost;
+`--quality medium|thorough` buys sharpness for longer converts.
+
+Then push it over the game's copy (rooted, like the skip-the-download tip
+above; adapt the package name for the original app):
+
+```bash
+adb push StS2-astc.pck /data/local/tmp/SlayTheSpire2.pck
+adb shell su -c '
+PKG=com.game.sts2launcher.modmanager.perf
+GAME=/data/data/$PKG/files/game
+am force-stop $PKG
+cp /data/local/tmp/SlayTheSpire2.pck $GAME/SlayTheSpire2.pck
+chown $(stat -c %u:%g $GAME) $GAME/SlayTheSpire2.pck
+restorecon $GAME/SlayTheSpire2.pck
+'
+```
+
+Notes: convert the **same game version** the launcher downloaded, and
+re-push after every game update (the launcher's download overwrites the
+file). The app only checks that the file is a Godot pack, so a mismatched
+version would fail at boot with a game error instead — the frame-time log
+(`Perf` stats line) shows the load-time difference. Without root there is
+no way to replace the file in the app's private storage.
 
 ## Publish a release (repo owner)
 

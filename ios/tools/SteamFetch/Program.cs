@@ -19,6 +19,12 @@
 //       "regex:<pattern>" lines match by regex. Downloads the matching files
 //       of the app's Windows 64-bit depots.
 //
+//   SteamFetch appinfo --app ID [--branch public]
+//       No sign-in, no secrets: an anonymous connection is enough to read a
+//       public app's product info. Prints `app=…`, `name=…`, `branch=…` and
+//       `buildid=…` lines for scripts; exit 1 if the branch has no build.
+//       The daily update-watch workflow uses this to spot new game builds.
+//
 // The depot logic follows the Android launcher's src/STS2Mobile/Steam/DepotDownloader.cs.
 
 using System.Collections.Concurrent;
@@ -42,6 +48,8 @@ static class SteamFetchProgram
                 return await Login(useCode: args.Contains("--code"));
             if (args.Length >= 1 && args[0] == "download")
                 return await Download(ParseOptions(args.Skip(1).ToArray()));
+            if (args.Length >= 1 && args[0] == "appinfo")
+                return await AppInfo(ParseOptions(args.Skip(1).ToArray()));
         }
         catch (AsyncJobFailedException)
         {
@@ -56,7 +64,8 @@ static class SteamFetchProgram
         Console.Error.WriteLine(
             "usage: SteamFetch login [--code]\n"
                 + "       SteamFetch download --user NAME --app ID --dir OUT --filelist FILE [--branch public]\n"
-                + "                           [--code-command PROGRAM]"
+                + "                           [--code-command PROGRAM]\n"
+                + "       SteamFetch appinfo --app ID [--branch public]"
         );
         return 2;
     }
@@ -168,6 +177,34 @@ static class SteamFetchProgram
         var count = await downloader.RunAsync();
         Console.WriteLine($"Downloaded {count} files to {dir}");
         return count > 0 ? 0 : 1;
+    }
+
+    // The game's current build on Steam, without signing in: public apps'
+    // product info (PICS) answers anonymous connections.
+    private static async Task<int> AppInfo(Dictionary<string, string> o)
+    {
+        var appId = uint.Parse(o.GetValueOrDefault("app") ?? throw new ArgumentException("--app is required"));
+        var branch = o.GetValueOrDefault("branch") ?? "public";
+
+        await using var session = await SteamSession.ConnectAsync();
+        await session.LogOnAnonymousAsync();
+
+        var tokens = await session.Apps.PICSGetAccessTokens(new[] { appId }, Enumerable.Empty<uint>());
+        ulong appToken = 0;
+        tokens.AppTokens?.TryGetValue(appId, out appToken);
+        var info = await session.Apps.PICSGetProductInfo(
+            new[] { new SteamApps.PICSRequest(appId, appToken) },
+            Enumerable.Empty<SteamApps.PICSRequest>()
+        );
+        var app = info.Results?.SelectMany(r => r.Apps.Values).FirstOrDefault(a => a.ID == appId)
+            ?? throw new InvalidOperationException($"no app info for {appId}");
+        var name = app.KeyValues["common"]["name"].Value ?? appId.ToString();
+        var buildId = app.KeyValues["depots"]["branches"][branch]["buildid"].Value;
+        Console.WriteLine($"app={appId}");
+        Console.WriteLine($"name={name}");
+        Console.WriteLine($"branch={branch}");
+        Console.WriteLine($"buildid={buildId ?? ""}");
+        return buildId == null ? 1 : 0;
     }
 
     // Steam closes a connection that hasn't signed in within about a minute,
@@ -334,6 +371,16 @@ sealed class SteamSession : IAsyncDisposable
                         ? ". Run `SteamFetch login` again and update the STEAM_REFRESH_TOKEN secret."
                         : "")
             );
+    }
+
+    // Enough for public product info (SteamFetch appinfo): no account, no
+    // secrets, so a scheduled workflow can watch for game updates.
+    public async Task LogOnAnonymousAsync()
+    {
+        User.LogOnAnonymous();
+        var result = await _loggedOn.Task.WaitAsync(TimeSpan.FromSeconds(60));
+        if (result.Result != EResult.OK)
+            throw new InvalidOperationException($"anonymous logon refused: {result.Result}");
     }
 
     public async ValueTask DisposeAsync()

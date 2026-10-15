@@ -34,6 +34,7 @@ internal static class PerfPanel
         {
             new("100", "100%"), new("75", "75%"), new("50", "50%"), new("25", "25%"), new("0", "Off"),
         }),
+        new("gc", "GC latency", new Option[] { new("game", "Game setting"), new("low", "Low latency") }),
         new("frame_log", "Frame-time log", new Option[]
         {
             new("0", "Off"), new("5", "Every 5 s"), new("10", "Every 10 s"), new("30", "Every 30 s"),

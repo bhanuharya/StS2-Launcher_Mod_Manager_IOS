@@ -94,7 +94,11 @@ def cmd_extract(args):
         for e in entries:
             if not _matches(e.path, args.globs) or e.flags & (FILE_ENCRYPTED | FILE_REMOVAL):
                 continue
-            dest = os.path.join(args.out_dir, *e.path.split("/"))
+            # Entry names come from the pack file; keep extraction inside out_dir.
+            clean = os.path.normpath(e.path)
+            if os.path.isabs(clean) or clean.startswith(".."):
+                raise ValueError(f"unsafe entry path in pack: {e.path!r}")
+            dest = os.path.join(args.out_dir, *clean.split("/"))
             os.makedirs(os.path.dirname(dest), exist_ok=True)
             f.seek(e.offset)
             data = f.read(e.size)
