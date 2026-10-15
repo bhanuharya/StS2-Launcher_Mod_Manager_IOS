@@ -67,6 +67,8 @@ internal static class FrameLog
     private static readonly List<float> DrawMs = new(8192);
     private static readonly List<float> GpuMs = new(8192);
     private static ulong _processStartUsec;
+    private static int _slowGpuFrames;
+    private const float SpikeGpuMs = 60f;
     private static ulong _preDrawUsec;
     private static DateTime _frameStartUtc;
     private static readonly List<(ulong DueUsec, DateTime FromUtc, DateTime ToUtc, float Ms, Counters D, List<string> Causes, string Suffix)> Pending = new();
@@ -227,7 +229,12 @@ internal static class FrameLog
         }
 
         FrameMs.Add(ms);
-        GpuMs.Add((float)RenderingServer.ViewportGetMeasuredRenderTimeGpu(((SceneTree)Engine.GetMainLoop()).Root.GetViewportRid()));
+        var gpu = (float)RenderingServer.ViewportGetMeasuredRenderTimeGpu(((SceneTree)Engine.GetMainLoop()).Root.GetViewportRid());
+        GpuMs.Add(gpu);
+        // A run of very slow GPU frames: log what's on screen (SceneProbe).
+        _slowGpuFrames = gpu >= SpikeGpuMs ? _slowGpuFrames + 1 : 0;
+        if (_slowGpuFrames == 4)
+            SceneProbe.Snapshot(gpu);
         _nodesAddedWindow += _nodesAddedFrame;
         var drawCalls = (int)Performance.GetMonitor(Performance.Monitor.RenderTotalDrawCallsInFrame);
         _drawCallsSum += drawCalls;

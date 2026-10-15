@@ -33,6 +33,8 @@ when the game starts.
 | FPS cap | Game setting, 30, 40, 45, 60, 90, 120 | Overrides the game's FPS limit. Pick a divisor of the display's refresh rate (40 or 60 on 120 Hz) for even pacing. |
 | VSync | Game setting, On, Off, Adaptive, Mailbox | Overrides the game's vsync. |
 | Particles | 100%, 75%, 50%, 25%, Off | Scales how many particles every emitter spawns. |
+| Card rendering | As the game, Fast | Fast draws each card straight to the screen instead of offscreen first. On a Pad 5 the cards in hand were half of a fight's GPU time. Loses the cards' ripple shader. |
+| Card trails | On, Off | Off hides the trail behind cards flying to a pile, where end-of-turn discards dropped to ~10 fps. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
 | Scene probe (once) | Off, Next fight | Measures what each part of the fight screen costs the GPU, once, then turns itself off. See below. |
@@ -73,6 +75,8 @@ can switch settings mid-fight with no restart and no rebuild:
 | `frame_log` | seconds between stats lines, `0` = off | `0` |
 | `jit_warmup` | `off`, `on` | `off` |
 | `probe` | `off`, `next_fight` (runs once, then back to `off`) | `off` |
+| `card_fx` | `game`, `fast` | `game` |
+| `card_trails` | `on`, `off` | `on` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
 
@@ -145,6 +149,29 @@ arrive. Up to 20 hitch lines per window; the stats line counts the rest.
    cpu/gpu split and how many cards are live; `[Perf] hitch` lines show
    one-off stutters.
 
+### Cards: the biggest cost in a fight
+
+What the 0.4.2.6 scene probe measured in a Silent fight on a Pad 5 at full
+resolution, out of 26 ms of GPU time per frame (60 fps needs under 16.7):
+
+| Part | GPU time |
+|---|---|
+| Cards in hand (~7) | 12.7 ms |
+| Background (6 full-screen layers) | ~6.6 ms |
+| Enemies and Silent | ~3 ms |
+| Transition overlay, invisible but drawn | 2.2 ms |
+
+Each card is a CanvasGroup: Godot draws the card offscreen, then composites
+it with the card_ripple shader. On a tile-based mobile GPU each offscreen
+pass costs about a full-screen read and write, so every card in hand costs
+~1.8 ms per frame. **Card rendering → Fast** draws the cards' parts straight
+to the screen. The ripple effect goes, and while a card fades its parts can
+show through each other.
+
+At the end of a turn, discarded cards fly to the pile with a trail, and
+frames ran at about 90 ms for 2–3 seconds. **Card trails → Off** hides the
+trails.
+
 ### Scene probe: what the GPU spends its time on
 
 On a Pad 5 a fight takes the GPU 40–50 ms per frame at full resolution and
@@ -159,7 +186,14 @@ seconds into the next fight (leave the screen alone for about a minute):
    that still run code every frame.
 2. It hides the biggest parts of the screen one at a time, for a moment
    each, and logs how much GPU time each one costs:
-   `probe:   +11.8 ms saved without Background/Layers (Control), 40 nodes`.
+   `probe:   +11.8 ms: Background/Layers (Control), 40 nodes`.
+3. It tries candidate fixes one at a time and logs what each saves: card
+   CanvasGroups drawn directly, clip masks off, the most used shaders
+   removed, background layers hidden (together and one by one), the
+   transition overlay hidden.
+
+With the frame log on, a run of GPU frames over 60 ms also logs a `spike:`
+snapshot of what's on screen at that moment (up to 6 per session).
 
 Then it switches itself off. Collect the log the same way as above
 (`[Perf] probe:` lines).
