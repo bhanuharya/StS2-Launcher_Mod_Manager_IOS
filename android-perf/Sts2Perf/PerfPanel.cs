@@ -39,6 +39,7 @@ internal static class PerfPanel
             new("0", "Off"), new("5", "Every 5 s"), new("10", "Every 10 s"), new("30", "Every 30 s"),
         }),
         new("jit_warmup", "JIT warm-up (experimental)", new Option[] { new("off", "Off"), new("on", "At main menu") }),
+        new("probe", "Scene probe (once)", new Option[] { new("off", "Off"), new("next_fight", "Next fight") }),
     };
 
     public static void Apply(Harmony harmony)

@@ -20,6 +20,8 @@ namespace STS2Perf;
 //                               line per hitch with its causes; 0 = off
 //   jit_warmup=off|on           on: compile the game's code at the main menu
 //                               (JitWarmup; experimental)
+//   probe=off|next_fight        next_fight: SceneProbe runs once in the next
+//                               fight, then sets this back to off
 //   root.<property>=<value>     any property of the game's root Window
 //   engine.<property>=<value>   any property of Engine
 //
@@ -73,6 +75,7 @@ internal static class PerfSettings
             "particles" => Raw("particles") ?? "100",
             "frame_log" => Raw("frame_log") ?? "0",
             "jit_warmup" => Raw("jit_warmup") ?? "off",
+            "probe" => Raw("probe") ?? "off",
             _ => Raw(key),
         };
     }
@@ -147,6 +150,7 @@ internal static class PerfSettings
             $"particles {ParticlesPercent}%",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",
+            $"probe {Value("probe")}",
         };
         parts.AddRange(PropertyOverrides.Select(o => $"{o.Target}.{o.Property}={o.Value}"));
         return string.Join(", ", parts);

@@ -13,16 +13,17 @@ namespace STS2Perf;
 //          | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full
 //          | effects on (hdr2d off) | particles 100%
 //          | jit +412 methods 151 ms | gc minor +14 major +0 | nodes 2140 (+380) | draw calls avg 180 max 260
-//          | cpu: scripts p50 3.1 p95 5.0, render p50 4.2 | gpu p50 11.8 p95 16.0
+//          | cpu: logic p50 3.1 p95 5.0, draw p50 4.2 | gpu p50 11.8 p95 16.0
 //          | live scenes: card x14, power_icon x9, ...
 //
-// The cpu/gpu part says where a slow frame's time goes: "scripts" is the
-// game's per-frame code (_Process callbacks), "render" the CPU side of
-// drawing, "gpu" the GPU's own time for the frame (Godot's render-time
-// measurement on the root viewport). Frames slow with gpu near the frame
-// time are GPU-bound: fewer pixels (resolution) or effects help. Slow with
-// gpu low: the CPU. "live scenes" counts instanced scenes in the tree, so a
-// screen full of cards shows how many there are.
+// The cpu/gpu part says where a slow frame's time goes, per frame: "logic"
+// is the game's per-frame work (process callbacks, tweens, animations; from
+// SceneTree.process_frame to RenderingServer.frame_pre_draw), "draw" the CPU
+// side of rendering (frame_pre_draw to frame_post_draw), "gpu" the GPU's own
+// time (Godot's render-time measurement on the root viewport). Frames slow
+// with gpu near the frame time are GPU-bound: fewer pixels or effects help.
+// Slow with gpu low: the CPU. "live scenes" counts instanced scenes in the
+// tree, so a screen full of cards shows how many there are.
 //
 // and, while it's on, a line for each frame over HitchMs with what happened
 // during it, so a stutter can be pinned on a cause:
@@ -62,9 +63,11 @@ internal static class FrameLog
     private static int _nodesAddedWindow;
     private static readonly Dictionary<string, int> ScenesFrame = new();
     private static readonly Dictionary<string, int> LiveScenes = new();
-    private static readonly List<float> ScriptMs = new(8192);
-    private static readonly List<float> RenderCpuMs = new(8192);
+    private static readonly List<float> LogicMs = new(8192);
+    private static readonly List<float> DrawMs = new(8192);
     private static readonly List<float> GpuMs = new(8192);
+    private static ulong _processStartUsec;
+    private static ulong _preDrawUsec;
     private static DateTime _frameStartUtc;
     private static readonly List<(ulong DueUsec, DateTime FromUtc, DateTime ToUtc, float Ms, Counters D, List<string> Causes, string Suffix)> Pending = new();
     private const ulong JitNamesDelayUsec = 1_500_000;
@@ -86,6 +89,8 @@ internal static class FrameLog
                 tree.ProcessFrame += OnFrame;
                 tree.NodeAdded += OnNodeAdded;
                 tree.NodeRemoved += OnNodeRemoved;
+                RenderingServer.FramePreDraw += OnPreDraw;
+                RenderingServer.FramePostDraw += OnPostDraw;
                 RenderingServer.ViewportSetMeasureRenderTime(tree.Root.GetViewportRid(), true);
                 _hooked = true;
             }
@@ -94,6 +99,8 @@ internal static class FrameLog
                 tree.ProcessFrame -= OnFrame;
                 tree.NodeAdded -= OnNodeAdded;
                 tree.NodeRemoved -= OnNodeRemoved;
+                RenderingServer.FramePreDraw -= OnPreDraw;
+                RenderingServer.FramePostDraw -= OnPostDraw;
                 RenderingServer.ViewportSetMeasureRenderTime(tree.Root.GetViewportRid(), false);
                 LiveScenes.Clear();
                 _hooked = false;
@@ -158,8 +165,27 @@ internal static class FrameLog
         return dot > 0 ? name[..dot] : name;
     }
 
+    // The game's logic for a frame runs between process_frame and the
+    // renderer's frame_pre_draw; drawing between pre and post draw.
+    private static void OnPreDraw()
+    {
+        var now = Time.GetTicksUsec();
+        if (_processStartUsec != 0 && now > _processStartUsec)
+            LogicMs.Add((now - _processStartUsec) / 1000f);
+        _preDrawUsec = now;
+    }
+
+    private static void OnPostDraw()
+    {
+        var now = Time.GetTicksUsec();
+        if (_preDrawUsec != 0 && now > _preDrawUsec)
+            DrawMs.Add((now - _preDrawUsec) / 1000f);
+        _preDrawUsec = 0;
+    }
+
     private static void OnFrame()
     {
+        _processStartUsec = Time.GetTicksUsec();
         try
         {
             Sample();
@@ -201,10 +227,7 @@ internal static class FrameLog
         }
 
         FrameMs.Add(ms);
-        ScriptMs.Add((float)(Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000));
-        var viewport = ((SceneTree)Engine.GetMainLoop()).Root.GetViewportRid();
-        RenderCpuMs.Add((float)RenderingServer.ViewportGetMeasuredRenderTimeCpu(viewport));
-        GpuMs.Add((float)RenderingServer.ViewportGetMeasuredRenderTimeGpu(viewport));
+        GpuMs.Add((float)RenderingServer.ViewportGetMeasuredRenderTimeGpu(((SceneTree)Engine.GetMainLoop()).Root.GetViewportRid()));
         _nodesAddedWindow += _nodesAddedFrame;
         var drawCalls = (int)Performance.GetMonitor(Performance.Monitor.RenderTotalDrawCallsInFrame);
         _drawCallsSum += drawCalls;
@@ -236,8 +259,8 @@ internal static class FrameLog
     private static void ResetWindow()
     {
         FrameMs.Clear();
-        ScriptMs.Clear();
-        RenderCpuMs.Clear();
+        LogicMs.Clear();
+        DrawMs.Clear();
         GpuMs.Clear();
         _hitchLines = _hitchesUnlogged = 0;
         _drawCallsSum = _drawCallsMax = 0;
@@ -332,11 +355,11 @@ internal static class FrameLog
                 + $" | gc minor +{d.GcMinor} major +{d.GcMajor}"
                 + $" | nodes {now.Nodes:0} (+{_nodesAddedWindow})"
                 + (_drawCallsMax > 0 ? $" | draw calls avg {_drawCallsSum / FrameMs.Count} max {_drawCallsMax}" : "")
-                + $" | cpu: scripts p50 {Pct(ScriptMs, 0.5):0.0} p95 {Pct(ScriptMs, 0.95):0.0}, render p50 {Pct(RenderCpuMs, 0.5):0.0}"
+                + $" | cpu: logic p50 {Pct(LogicMs, 0.5):0.0} p95 {Pct(LogicMs, 0.95):0.0}, draw p50 {Pct(DrawMs, 0.5):0.0} p95 {Pct(DrawMs, 0.95):0.0}"
                 + (GpuMs.Any(g => g > 0) ? $" | gpu p50 {Pct(GpuMs, 0.5):0.0} p95 {Pct(GpuMs, 0.95):0.0}" : " | gpu n/a")
                 + (LiveScenes.Count > 0
                     ? " | live scenes: "
-                        + string.Join(", ", LiveScenes.OrderByDescending(kv => kv.Value).Take(6).Select(kv => $"{kv.Key} x{kv.Value}"))
+                        + string.Join(", ", LiveScenes.OrderByDescending(kv => kv.Value).Take(8).Select(kv => $"{kv.Key} x{kv.Value}"))
                     : "")
         );
     }
