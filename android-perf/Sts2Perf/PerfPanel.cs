@@ -36,12 +36,13 @@ internal static class PerfPanel
         }),
         new("card_fx", "Card rendering", new Option[] { new("game", "As the game"), new("fast", "Fast (no ripple)") }),
         new("card_trails", "Card trails", new Option[] { new("on", "On"), new("off", "Off") }),
+        new("idle_overlay", "Idle transition layer", new Option[] { new("draw", "Draw (game)"), new("skip", "Skip") }),
         new("frame_log", "Frame-time log", new Option[]
         {
             new("0", "Off"), new("5", "Every 5 s"), new("10", "Every 10 s"), new("30", "Every 30 s"),
         }),
         new("jit_warmup", "JIT warm-up (experimental)", new Option[] { new("off", "Off"), new("on", "At main menu") }),
-        new("probe", "Scene probe (once)", new Option[] { new("off", "Off"), new("next_fight", "Next fight") }),
+        new("probe", "Scene probe (once)", new Option[] { new("off", "Off"), new("next_fight", "Next fight"), new("spikes", "Slow moments") }),
     };
 
     public static void Apply(Harmony harmony)

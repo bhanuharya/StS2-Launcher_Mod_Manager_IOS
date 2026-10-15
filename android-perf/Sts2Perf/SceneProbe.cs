@@ -27,6 +27,10 @@ namespace STS2Perf;
 //
 // Snapshot(), called by FrameLog when GPU frames spike, logs what is on
 // screen at that moment the same way, for slowdowns too short for the probe.
+// With probe=spikes it then tests, while the slowdown lasts, what the GPU
+// time is with one thing hidden at a time: scenes added in the last few
+// seconds first (the enemy-turn banner, cards flying off), then the biggest
+// branches. A few tests per slowdown, for the next five slowdowns.
 internal static class SceneProbe
 {
     private const int BaselineFrames = 12;
@@ -331,7 +335,12 @@ internal static class SceneProbe
 
     private static Step Hide(string section, CanvasItem node, string label, int nodes) =>
         new(section, label, nodes,
-            () => RenderingServer.CanvasItemSetVisible(node.GetCanvasItem(), false),
+            () =>
+            {
+                // Cards and effects come and go while the probe runs.
+                if (GodotObject.IsInstanceValid(node))
+                    RenderingServer.CanvasItemSetVisible(node.GetCanvasItem(), false);
+            },
             () =>
             {
                 if (GodotObject.IsInstanceValid(node))
@@ -345,7 +354,10 @@ internal static class SceneProbe
 
     // The biggest visible branches, skipping wrappers that hold nearly the
     // same nodes as a branch already picked, plus the player's hand.
-    private static IEnumerable<Step> Bisect(List<Item> items)
+    private static IEnumerable<Step> Bisect(List<Item> items) =>
+        Branches(items).Select(i => Hide("part", (CanvasItem)items[i].Node, Label(items[i].Node), items[i].Subtree));
+
+    private static List<int> Branches(List<Item> items)
     {
         var total = items.Count;
         var picked = new List<int>();
@@ -368,7 +380,7 @@ internal static class SceneProbe
         foreach (var i in Enumerable.Range(0, items.Count).Where(i => Usable(i) && items[i].Node.GetType().Name == "NPlayerHand"))
             if (!picked.Contains(i))
                 picked.Add(i);
-        return picked.Select(i => Hide("part", (CanvasItem)items[i].Node, Label(items[i].Node), items[i].Subtree));
+        return picked;
     }
 
     private static IEnumerable<Step> Experiments(List<Item> items)
@@ -550,12 +562,152 @@ internal static class SceneProbe
         _lastSnapshotUsec = now;
         try
         {
-            PerfEntry.Log($"spike: GPU {gpuMs:0} ms per frame for several frames; on screen now:");
-            Inventory(Walk(((SceneTree)Engine.GetMainLoop()).Root), "spike");
+            var recent = FrameLog.ScenesAddedWithin(5);
+            PerfEntry.Log(
+                $"spike: GPU {gpuMs:0} ms per frame for several frames; added in the last 5 s: "
+                    + string.Join(", ", recent.GroupBy(r => r.Name).Select(g => $"{g.Key} x{g.Count()}"))
+            );
+            var items = Walk(((SceneTree)Engine.GetMainLoop()).Root);
+            Inventory(items, "spike");
+            if (PerfSettings.Value("probe") == "spikes" && !_spikeRunning && _spikeRuns < MaxSpikeRuns)
+                StartSpikeTests(gpuMs, items, recent);
         }
         catch (Exception ex)
         {
             PerfEntry.Log($"spike snapshot failed: {ex.Message}");
+        }
+    }
+
+    // ---- slow moments (probe=spikes) ------------------------------------
+
+    private const int SpikeSettle = 3;
+    private const int SpikeMeasure = 2;
+    private const int SpikeGap = 3;
+    private const int MaxSpikeRuns = 5;
+    private const int MaxTestsPerSpike = 6;
+    private const float SpikeOverMs = 40;
+
+    private static int _spikeRuns;
+    private static bool _spikeRunning;
+    private static readonly HashSet<string> SpikeTested = new();
+    private static List<(CanvasItem Node, string Key, string Label)> _spikeCandidates;
+    private static int _spikeIndex;
+    private static int _spikeFrame;
+    private static bool _spikeHidden;
+    private static float _spikeBase;
+    private static (string Label, float Base, float With)? _spikePending;
+    private static readonly List<float> SpikeSamples = new();
+
+    private static void StartSpikeTests(float gpu, List<Item> items, List<(Node Node, string Name)> recent)
+    {
+        var candidates = new List<(CanvasItem, string, string)>();
+        void Add(Node node, string key)
+        {
+            if (node is CanvasItem ci && ci.IsVisibleInTree() && !SpikeTested.Contains(key) && candidates.All(c => c.Item2 != key))
+                candidates.Add((ci, key, Label(node)));
+        }
+        foreach (var (node, name) in recent)
+            Add(node, $"{name}:{node.GetType().Name}");
+        foreach (var i in Branches(items))
+            Add(items[i].Node, Label(items[i].Node));
+        _spikeCandidates = candidates.Take(MaxTestsPerSpike).ToList();
+        if (_spikeCandidates.Count == 0)
+            return;
+        _spikeRuns++;
+        _spikeRunning = true;
+        _spikeIndex = -1;
+        _spikeFrame = SpikeGap;
+        _spikeHidden = false;
+        _spikePending = null;
+        _spikeBase = gpu;
+        ((SceneTree)Engine.GetMainLoop()).ProcessFrame += OnSpikeFrame;
+        PerfEntry.Log($"spike tests ({_spikeRuns}/{MaxSpikeRuns}): hiding one at a time: {string.Join("; ", _spikeCandidates.Select(c => c.Label))}");
+    }
+
+    private static void OnSpikeFrame()
+    {
+        try
+        {
+            SpikeStep();
+        }
+        catch (Exception ex)
+        {
+            PerfEntry.Log($"spike tests failed: {ex.Message}");
+            SpikeRestore();
+            SpikeStop();
+        }
+    }
+
+    private static void SpikeStep()
+    {
+        var gpu = (float)RenderingServer.ViewportGetMeasuredRenderTimeGpu(((SceneTree)Engine.GetMainLoop()).Root.GetViewportRid());
+        _spikeFrame++;
+        if (!_spikeHidden)
+        {
+            if (_spikeFrame < SpikeGap)
+                return;
+            // GPU time with everything back: still slow, or the slowdown ended?
+            var stillSlow = gpu >= SpikeOverMs;
+            if (_spikePending is { } p)
+            {
+                PerfEntry.Log(
+                    stillSlow
+                        ? $"spike test: without {p.Label}: GPU {p.With:0.0} ms (slow frames {p.Base:0.0} ms, {p.Base - p.With:+0.0;-0.0} saved)"
+                        : $"spike test: without {p.Label}: GPU {p.With:0.0} ms, but the slowdown ended meanwhile, so not conclusive"
+                );
+                _spikePending = null;
+            }
+            if (!stillSlow)
+            {
+                PerfEntry.Log($"spike tests: slowdown over (GPU {gpu:0.0} ms)");
+                SpikeStop();
+                return;
+            }
+            _spikeBase = gpu;
+            _spikeIndex++;
+            while (_spikeIndex < _spikeCandidates.Count && !GodotObject.IsInstanceValid(_spikeCandidates[_spikeIndex].Node))
+                _spikeIndex++;
+            if (_spikeIndex >= _spikeCandidates.Count)
+            {
+                SpikeStop();
+                return;
+            }
+            RenderingServer.CanvasItemSetVisible(_spikeCandidates[_spikeIndex].Node.GetCanvasItem(), false);
+            _spikeHidden = true;
+            _spikeFrame = 0;
+            SpikeSamples.Clear();
+            return;
+        }
+        if (_spikeFrame > SpikeSettle)
+            SpikeSamples.Add(gpu);
+        if (_spikeFrame < SpikeSettle + SpikeMeasure)
+            return;
+        var candidate = _spikeCandidates[_spikeIndex];
+        SpikeTested.Add(candidate.Key);
+        _spikePending = (candidate.Label, _spikeBase, SpikeSamples.Average());
+        SpikeRestore();
+        _spikeFrame = 0;
+    }
+
+    private static void SpikeRestore()
+    {
+        if (!_spikeHidden || _spikeCandidates == null || _spikeIndex < 0 || _spikeIndex >= _spikeCandidates.Count)
+            return;
+        var node = _spikeCandidates[_spikeIndex].Node;
+        if (GodotObject.IsInstanceValid(node))
+            RenderingServer.CanvasItemSetVisible(node.GetCanvasItem(), node.Visible);
+        _spikeHidden = false;
+    }
+
+    private static void SpikeStop()
+    {
+        ((SceneTree)Engine.GetMainLoop()).ProcessFrame -= OnSpikeFrame;
+        _spikeRunning = false;
+        _spikeCandidates = null;
+        if (_spikeRuns >= MaxSpikeRuns && PerfSettings.Value("probe") == "spikes")
+        {
+            PerfSettings.Set("probe", "off");
+            PerfEntry.Log("spike tests: done, Scene probe is off again");
         }
     }
 }

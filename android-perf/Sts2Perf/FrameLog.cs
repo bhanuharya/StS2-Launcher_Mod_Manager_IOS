@@ -63,6 +63,8 @@ internal static class FrameLog
     private static int _nodesAddedWindow;
     private static readonly Dictionary<string, int> ScenesFrame = new();
     private static readonly Dictionary<string, int> LiveScenes = new();
+    private static readonly List<(ulong Usec, Node Node, string Name)> RecentScenes = new();
+    private const ulong RecentKeepUsec = 8_000_000;
     private static readonly List<float> LogicMs = new(8192);
     private static readonly List<float> DrawMs = new(8192);
     private static readonly List<float> GpuMs = new(8192);
@@ -129,6 +131,7 @@ internal static class FrameLog
                 return;
             ScenesFrame[name] = ScenesFrame.TryGetValue(name, out var n) ? n + 1 : 1;
             LiveScenes[name] = LiveScenes.TryGetValue(name, out var live) ? live + 1 : 1;
+            RecentScenes.Add((Time.GetTicksUsec(), node, name));
         }
         catch
         {
@@ -185,9 +188,25 @@ internal static class FrameLog
         _preDrawUsec = 0;
     }
 
+    // Instanced scenes added in the last few seconds, newest first.
+    public static List<(Node Node, string Name)> ScenesAddedWithin(double seconds)
+    {
+        var since = Time.GetTicksUsec() - (ulong)(seconds * 1_000_000);
+        var found = new List<(Node, string)>();
+        for (var i = RecentScenes.Count - 1; i >= 0 && RecentScenes[i].Usec >= since; i--)
+            if (GodotObject.IsInstanceValid(RecentScenes[i].Node))
+                found.Add((RecentScenes[i].Node, RecentScenes[i].Name));
+        return found;
+    }
+
     private static void OnFrame()
     {
         _processStartUsec = Time.GetTicksUsec();
+        var old = 0;
+        while (old < RecentScenes.Count && _processStartUsec - RecentScenes[old].Usec > RecentKeepUsec)
+            old++;
+        if (old > 0)
+            RecentScenes.RemoveRange(0, old);
         try
         {
             Sample();
