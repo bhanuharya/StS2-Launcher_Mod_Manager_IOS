@@ -146,8 +146,8 @@ port works differently:
   compiles everything to native ARM64 with .NET NativeAOT. No Mac needed on
   your side.
 - **Your game data stays yours.** The app doesn't contain
-  `SlayTheSpire2.pck`. You copy it from your PC, and the app checks that it
-  matches the build.
+  `SlayTheSpire2.pck`. The build's encrypted download carries the converted
+  `SlayTheSpire2.pck`, and the app checks that it matches the build.
 - **Private by default.** This repository is public, so the app is only
   uploaded inside a zip encrypted with your password.
 
@@ -170,9 +170,9 @@ port works differently:
 - A Steam account that owns the game, with **Steam Guard in the Steam app**
   (or e-mail codes).
 - A GitHub account with a fork of this repository.
-- A **Windows PC or Mac** with Steam (for `SlayTheSpire2.pck` and your saves)
-  and **Sideloadly**, plus Apple's **iTunes** and **iCloud** from apple.com
-  (not the Microsoft Store versions).
+- A **Windows PC or Mac** with Steam (for your saves) and **Sideloadly**,
+  plus Apple's **iTunes** and **iCloud** from apple.com (not the Microsoft
+  Store versions).
 - An iPhone or iPad on iOS 16 or later, a USB data cable, and an Apple ID (a
   spare one is fine).
 
@@ -194,7 +194,8 @@ port works differently:
    with the code. If the Steam app then asks to approve a sign-in, **don't
    approve it**; Steam blocks approvals from the build machine's location,
    and the code already signed it in.
-3. After about 15 minutes, download the **StS2-ios-…** artifact from the run
+3. After 40–60 minutes (the build also converts the game's textures to
+   ASTC), download the **StS2-ios-…** artifact from the run
    (kept for 3 days). Open the zip inside it with **7-Zip** and your
    `IPA_PASSWORD`.
 4. Install `StS2.ipa` with **Sideloadly** over USB. Then on the iPhone:

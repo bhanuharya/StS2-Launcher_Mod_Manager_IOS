@@ -109,8 +109,9 @@ send these instead:
    has blocked this sign in"). Your code already signs the build in. No
    Steam Guard in the Steam app? Reply `email`, and then reply with the code
    Steam e-mails you.
-3. Wait about 30–40 minutes. The run uploads **StS2-ios-<version>-run<N>**
-   (kept for 3 days).
+3. Wait about 40–60 minutes; converting the textures adds to the old build
+   time (`astc_quality` = fast keeps it shortest). The run uploads
+   **StS2-ios-<version>-run<N>** (kept for 3 days).
 
 **Skip the code with a saved login (optional, needs a PC).** On Windows or
 Linux, download **SteamFetch-win-x64** or **SteamFetch-linux-x64** from the
