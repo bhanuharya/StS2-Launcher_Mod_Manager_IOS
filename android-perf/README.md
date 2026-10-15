@@ -93,7 +93,7 @@ Every change is logged (`[Perf] settings changed: …`, then what was applied),
 and with `frame_log` set, a line like this every N seconds:
 
 ```
-[Perf] frames 10s: 59.8 fps | ms p50 16.7 p95 17.9 p99 24.1 max 41.3 | hitches 3 | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full | effects on (hdr2d off) | particles 100% | jit +412 methods 151 ms | gc minor +14 major +0 | nodes 2140 (+380) | draw calls avg 180 max 260
+[Perf] frames 10s: 59.8 fps | ms p50 16.7 p95 17.9 p99 24.1 max 41.3 | hitches 3 | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full | effects on (hdr2d off) | particles 100% | jit +412 methods 151 ms | gc minor +14 major +0 | nodes 2140 (+380) | draw calls avg 180 max 260 | cpu: scripts p50 3.1 p95 5.0, render p50 4.2 | gpu p50 11.8 p95 16.0 | live scenes: card x14, power_icon x9
 ```
 
 and one line for every frame over 50 ms, with what happened during it:
@@ -107,6 +107,12 @@ render thread. `hitches` counts frames slower than 1.5× the median. Android
 can't time this app's frames from outside (its SurfaceView has no per-frame
 latency data), so this is the way to compare settings. What the parts mean:
 
+- **cpu / gpu**: where the frame's time goes. `scripts` is the game's
+  per-frame code, `render` the CPU side of drawing, `gpu` the GPU's own time
+  per frame. When `gpu` is close to the frame time (`ms p50`), the GPU is the
+  limit: fewer pixels or effects help. When it's well below, the CPU is.
+- **live scenes**: instanced scenes in the game right now, most first, so a
+  screen full of cards shows how many there are.
 - **jit**: the game's .NET code runs on Mono's JIT on Android, so every method
   is compiled the first time it runs. A first Blade Dance or a first new enemy
   can stall a frame on that alone. The names in brackets are the classes that
@@ -122,13 +128,19 @@ latency data), so this is the way to compare settings. What the parts mean:
 A JIT hitch is logged a second or so late, once the compiled methods' names
 arrive. Up to 20 hitch lines per window; the stats line counts the rest.
 
-### Finding stutters on shiv turns
+### Finding what's slow with a lot of cards
 
 1. **Perf settings** → **Frame-time log** → Every 10 s. Tap **Debug** so it
    reads ON (it saves the log to a file), then restart the app.
-2. Play a fight with a lot of shivs.
-3. The log is in `StS2LauncherMM/Logs` on the tablet's storage (the Debug
-   button shows the exact file). Look for `[Perf] hitch` lines.
+2. Play a fight until the hand is full (Blade Dance, Cloak and Dagger) and
+   stay on that turn for 20–30 seconds.
+3. For a comparison, on the same kind of turn, set **Resolution → Low res**
+   for 20 seconds, then **Particles → Off** for 20 seconds. Settings apply
+   within 2 seconds, mid-fight.
+4. The log is in `StS2LauncherMM/Logs` on the tablet's storage (the Debug
+   button shows the exact file). The `[Perf] frames` lines show fps, the
+   cpu/gpu split and how many cards are live; `[Perf] hitch` lines show
+   one-off stutters.
 
 ### JIT warm-up (experimental)
 

@@ -13,6 +13,16 @@ namespace STS2Perf;
 //          | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full
 //          | effects on (hdr2d off) | particles 100%
 //          | jit +412 methods 151 ms | gc minor +14 major +0 | nodes 2140 (+380) | draw calls avg 180 max 260
+//          | cpu: scripts p50 3.1 p95 5.0, render p50 4.2 | gpu p50 11.8 p95 16.0
+//          | live scenes: card x14, power_icon x9, ...
+//
+// The cpu/gpu part says where a slow frame's time goes: "scripts" is the
+// game's per-frame code (_Process callbacks), "render" the CPU side of
+// drawing, "gpu" the GPU's own time for the frame (Godot's render-time
+// measurement on the root viewport). Frames slow with gpu near the frame
+// time are GPU-bound: fewer pixels (resolution) or effects help. Slow with
+// gpu low: the CPU. "live scenes" counts instanced scenes in the tree, so a
+// screen full of cards shows how many there are.
 //
 // and, while it's on, a line for each frame over HitchMs with what happened
 // during it, so a stutter can be pinned on a cause:
@@ -51,6 +61,10 @@ internal static class FrameLog
     private static int _nodesAddedFrame;
     private static int _nodesAddedWindow;
     private static readonly Dictionary<string, int> ScenesFrame = new();
+    private static readonly Dictionary<string, int> LiveScenes = new();
+    private static readonly List<float> ScriptMs = new(8192);
+    private static readonly List<float> RenderCpuMs = new(8192);
+    private static readonly List<float> GpuMs = new(8192);
     private static DateTime _frameStartUtc;
     private static readonly List<(ulong DueUsec, DateTime FromUtc, DateTime ToUtc, float Ms, Counters D, List<string> Causes, string Suffix)> Pending = new();
     private const ulong JitNamesDelayUsec = 1_500_000;
@@ -71,12 +85,17 @@ internal static class FrameLog
             {
                 tree.ProcessFrame += OnFrame;
                 tree.NodeAdded += OnNodeAdded;
+                tree.NodeRemoved += OnNodeRemoved;
+                RenderingServer.ViewportSetMeasureRenderTime(tree.Root.GetViewportRid(), true);
                 _hooked = true;
             }
             else if (seconds == 0 && _hooked)
             {
                 tree.ProcessFrame -= OnFrame;
                 tree.NodeAdded -= OnNodeAdded;
+                tree.NodeRemoved -= OnNodeRemoved;
+                RenderingServer.ViewportSetMeasureRenderTime(tree.Root.GetViewportRid(), false);
+                LiveScenes.Clear();
                 _hooked = false;
             }
             PerfEntry.Log(
@@ -96,21 +115,47 @@ internal static class FrameLog
         _nodesAddedFrame++;
         try
         {
-            // Only instanced scenes have a file; their children don't, which
-            // keeps the names to one per effect, card, or creature.
-            var path = node.SceneFilePath;
-            if (string.IsNullOrEmpty(path))
+            var name = SceneName(node);
+            if (name == null)
                 return;
-            var name = path[(path.LastIndexOf('/') + 1)..];
-            var dot = name.LastIndexOf('.');
-            if (dot > 0)
-                name = name[..dot];
             ScenesFrame[name] = ScenesFrame.TryGetValue(name, out var n) ? n + 1 : 1;
+            LiveScenes[name] = LiveScenes.TryGetValue(name, out var live) ? live + 1 : 1;
         }
         catch
         {
             // Never let the log break the game's node setup.
         }
+    }
+
+    private static void OnNodeRemoved(Node node)
+    {
+        try
+        {
+            var name = SceneName(node);
+            if (name != null && LiveScenes.TryGetValue(name, out var live))
+            {
+                if (live > 1)
+                    LiveScenes[name] = live - 1;
+                else
+                    LiveScenes.Remove(name);
+            }
+        }
+        catch
+        {
+            // As above.
+        }
+    }
+
+    // Only instanced scenes have a file; their children don't, which keeps
+    // the names to one per effect, card, or creature.
+    private static string SceneName(Node node)
+    {
+        var path = node.SceneFilePath;
+        if (string.IsNullOrEmpty(path))
+            return null;
+        var name = path[(path.LastIndexOf('/') + 1)..];
+        var dot = name.LastIndexOf('.');
+        return dot > 0 ? name[..dot] : name;
     }
 
     private static void OnFrame()
@@ -156,6 +201,10 @@ internal static class FrameLog
         }
 
         FrameMs.Add(ms);
+        ScriptMs.Add((float)(Performance.GetMonitor(Performance.Monitor.TimeProcess) * 1000));
+        var viewport = ((SceneTree)Engine.GetMainLoop()).Root.GetViewportRid();
+        RenderCpuMs.Add((float)RenderingServer.ViewportGetMeasuredRenderTimeCpu(viewport));
+        GpuMs.Add((float)RenderingServer.ViewportGetMeasuredRenderTimeGpu(viewport));
         _nodesAddedWindow += _nodesAddedFrame;
         var drawCalls = (int)Performance.GetMonitor(Performance.Monitor.RenderTotalDrawCallsInFrame);
         _drawCallsSum += drawCalls;
@@ -187,6 +236,9 @@ internal static class FrameLog
     private static void ResetWindow()
     {
         FrameMs.Clear();
+        ScriptMs.Clear();
+        RenderCpuMs.Clear();
+        GpuMs.Clear();
         _hitchLines = _hitchesUnlogged = 0;
         _drawCallsSum = _drawCallsMax = 0;
         _nodesAddedWindow = 0;
@@ -280,7 +332,21 @@ internal static class FrameLog
                 + $" | gc minor +{d.GcMinor} major +{d.GcMajor}"
                 + $" | nodes {now.Nodes:0} (+{_nodesAddedWindow})"
                 + (_drawCallsMax > 0 ? $" | draw calls avg {_drawCallsSum / FrameMs.Count} max {_drawCallsMax}" : "")
+                + $" | cpu: scripts p50 {Pct(ScriptMs, 0.5):0.0} p95 {Pct(ScriptMs, 0.95):0.0}, render p50 {Pct(RenderCpuMs, 0.5):0.0}"
+                + (GpuMs.Any(g => g > 0) ? $" | gpu p50 {Pct(GpuMs, 0.5):0.0} p95 {Pct(GpuMs, 0.95):0.0}" : " | gpu n/a")
+                + (LiveScenes.Count > 0
+                    ? " | live scenes: "
+                        + string.Join(", ", LiveScenes.OrderByDescending(kv => kv.Value).Take(6).Select(kv => $"{kv.Key} x{kv.Value}"))
+                    : "")
         );
+    }
+
+    private static float Pct(List<float> values, double q)
+    {
+        if (values.Count == 0)
+            return 0;
+        values.Sort();
+        return values[Math.Min(values.Count - 1, (int)(q * values.Count))];
     }
 
     // Cumulative counters, sampled once per frame.
