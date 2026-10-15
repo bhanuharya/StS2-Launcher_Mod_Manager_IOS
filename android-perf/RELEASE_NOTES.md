@@ -1,5 +1,5 @@
 <!-- launcher-dialog -->
-StS2 Launcher Perf {{VERSION}} (based on upstream {{UPSTREAM_TAG}}): English launcher, and a Perf settings panel next to the Debug button (FPS cap, vsync, particles, resolution, effects, frame-time log that names what caused each stutter, experimental JIT warm-up).
+StS2 Launcher Perf {{VERSION}} (based on upstream {{UPSTREAM_TAG}}): English launcher, and a Perf settings panel next to the Debug button (FPS cap, vsync, particles, resolution, effects, frame-time log with the CPU/GPU split and what caused each stutter, a one-shot scene probe that measures what the fight screen costs the GPU, experimental JIT warm-up).
 <!-- /launcher-dialog -->
 
 **StS2 Launcher Perf {{VERSION}}**: the [StS2 Launcher Mod Manager](https://github.com/{{UPSTREAM_REPO}}) {{UPSTREAM_TAG}} release with a performance add-on, for lower-end Android devices.
@@ -8,7 +8,7 @@ It installs **next to** the original app (package `{{PACKAGE}}`, app name "StS2 
 
 ### What's different from upstream {{UPSTREAM_TAG}}
 
-- **Perf settings** button next to **Debug**: FPS cap, vsync, particles, resolution, full-screen effects, a frame-time log that names what caused each stutter (JIT compiles, GC, shaders, textures, new nodes), and an experimental **JIT warm-up** that compiles the game code earlier sessions needed at the main menu, so it isn't compiled mid-fight. Defaults change nothing. Settings live in `sts2perf.cfg`, which the app re-reads every 2 seconds, so they can also be changed over adb while playing; see the README.
+- **Perf settings** button next to **Debug**: FPS cap, vsync, particles, resolution, full-screen effects, a frame-time log that splits frame time into game logic, CPU drawing and GPU, and names what caused each stutter (JIT compiles, GC, shaders, textures, new nodes), a one-shot **Scene probe** that measures what each part of the fight screen costs the GPU, and an experimental **JIT warm-up** that compiles the game code earlier sessions needed at the main menu, so it isn't compiled mid-fight. Defaults change nothing. Settings live in `sts2perf.cfg`, which the app re-reads every 2 seconds, so they can also be changed over adb while playing; see the README.
 - The launcher's Korean-only dialogs (Save Manager, backups, cloud sync, Mod Hub messages) are in English.
 - **CHECK LAUNCHER UPDATE** looks for new versions on this fork's Releases page.
 

@@ -35,6 +35,7 @@ when the game starts.
 | Particles | 100%, 75%, 50%, 25%, Off | Scales how many particles every emitter spawns. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
+| Scene probe (once) | Off, Next fight | Measures what each part of the fight screen costs the GPU, once, then turns itself off. See below. |
 
 "Game setting" / 100% / Full / "As the game sets" leave the game exactly as
 upstream ships it, and turning a setting back restores the game's own value.
@@ -71,6 +72,7 @@ can switch settings mid-fight with no restart and no rebuild:
 | `particles` | `0`–`100` (percent) | `100` |
 | `frame_log` | seconds between stats lines, `0` = off | `0` |
 | `jit_warmup` | `off`, `on` | `off` |
+| `probe` | `off`, `next_fight` (runs once, then back to `off`) | `off` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
 
@@ -93,7 +95,7 @@ Every change is logged (`[Perf] settings changed: …`, then what was applied),
 and with `frame_log` set, a line like this every N seconds:
 
 ```
-[Perf] frames 10s: 59.8 fps | ms p50 16.7 p95 17.9 p99 24.1 max 41.3 | hitches 3 | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full | effects on (hdr2d off) | particles 100% | jit +412 methods 151 ms | gc minor +14 major +0 | nodes 2140 (+380) | draw calls avg 180 max 260 | cpu: scripts p50 3.1 p95 5.0, render p50 4.2 | gpu p50 11.8 p95 16.0 | live scenes: card x14, power_icon x9
+[Perf] frames 10s: 59.8 fps | ms p50 16.7 p95 17.9 p99 24.1 max 41.3 | hitches 3 | cap 60 | vsync Enabled | render 2560x1600 of 2560x1600 | resolution full | effects on (hdr2d off) | particles 100% | jit +412 methods 151 ms | gc minor +14 major +0 | nodes 2140 (+380) | draw calls avg 180 max 260 | cpu: logic p50 3.1 p95 5.0, draw p50 1.2 p95 2.0 | gpu p50 11.8 p95 16.0 | live scenes: card x14, power_icon x9
 ```
 
 and one line for every frame over 50 ms, with what happened during it:
@@ -107,10 +109,11 @@ render thread. `hitches` counts frames slower than 1.5× the median. Android
 can't time this app's frames from outside (its SurfaceView has no per-frame
 latency data), so this is the way to compare settings. What the parts mean:
 
-- **cpu / gpu**: where the frame's time goes. `scripts` is the game's
-  per-frame code, `render` the CPU side of drawing, `gpu` the GPU's own time
-  per frame. When `gpu` is close to the frame time (`ms p50`), the GPU is the
-  limit: fewer pixels or effects help. When it's well below, the CPU is.
+- **cpu / gpu**: where each frame's time goes. `logic` is the game's
+  per-frame work (scripts, animations, tweens), `draw` the CPU side of
+  rendering, `gpu` the GPU's own time. When `gpu` is close to the frame time
+  (`ms p50`), the GPU is the limit: fewer pixels or effects help. When it's
+  well below, the CPU is.
 - **live scenes**: instanced scenes in the game right now, most first, so a
   screen full of cards shows how many there are.
 - **jit**: the game's .NET code runs on Mono's JIT on Android, so every method
@@ -141,6 +144,25 @@ arrive. Up to 20 hitch lines per window; the stats line counts the rest.
    button shows the exact file). The `[Perf] frames` lines show fps, the
    cpu/gpu split and how many cards are live; `[Perf] hitch` lines show
    one-off stutters.
+
+### Scene probe: what the GPU spends its time on
+
+On a Pad 5 a fight takes the GPU 40–50 ms per frame at full resolution and
+about 25 ms at Low res, against 6–9 ms on the map, even with effects and
+particles off. **Scene probe → Next fight** finds where that goes. A few
+seconds into the next fight (leave the screen alone for about a minute):
+
+1. It logs what the screen is made of: items covering half the screen or
+   more (each one a full-screen fill), the shaders in use and which read the
+   screen, CanvasGroups and clip masks (drawn offscreen first), 2D lights,
+   SubViewports with their own GPU time, Spine skeletons, and hidden nodes
+   that still run code every frame.
+2. It hides the biggest parts of the screen one at a time, for a moment
+   each, and logs how much GPU time each one costs:
+   `probe:   +11.8 ms saved without Background/Layers (Control), 40 nodes`.
+
+Then it switches itself off. Collect the log the same way as above
+(`[Perf] probe:` lines).
 
 ### JIT warm-up (experimental)
 

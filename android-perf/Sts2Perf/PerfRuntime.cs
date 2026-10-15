@@ -170,7 +170,10 @@ internal static class PerfRuntime
         Run("particles", () => ApplyParticles(tree));
         Run("properties", () => ApplyProperties(root));
         if (_gameUiSeen)
+        {
             Run("jit warm-up", JitWarmup.MaybeStart);
+            Run("scene probe", SceneProbe.Tick);
+        }
     }
 
     private static void Run(string what, Action action)
