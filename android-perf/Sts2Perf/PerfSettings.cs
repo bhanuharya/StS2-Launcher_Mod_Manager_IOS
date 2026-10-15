@@ -16,9 +16,10 @@ namespace STS2Perf;
 //   max_fps=0|<n>               0 = the game's FPS limit setting
 //   vsync=game|on|off|adaptive|mailbox
 //   particles=<0-100>           % of particles emitted (100 = as designed)
-//   gc=game|low                 low: GCSettings.SustainedLowLatency (fewer
-//                               blocking gen2 pauses, a little more memory)
-//   frame_log=<seconds>         frame-time stats line every N s; 0 = off
+//   frame_log=<seconds>         frame-time stats line every N s, plus a
+//                               line per hitch with its causes; 0 = off
+//   jit_warmup=off|on           on: compile the game's code at the main menu
+//                               (JitWarmup; experimental)
 //   root.<property>=<value>     any property of the game's root Window
 //   engine.<property>=<value>   any property of Engine
 //
@@ -41,8 +42,8 @@ internal static class PerfSettings
     public static int MaxFps => Int("max_fps", 0, 0, 1000);
     public static string Vsync => Value("vsync");
     public static int ParticlesPercent => Int("particles", 100, 0, 100);
-    public static bool LowLatencyGc => Value("gc") == "low";
     public static int FrameLogSeconds => Int("frame_log", 0, 0, 600);
+    public static bool JitWarmup => Value("jit_warmup") == "on";
 
     public static IEnumerable<(string Target, string Property, string Value)> PropertyOverrides
     {
@@ -70,8 +71,8 @@ internal static class PerfSettings
             "max_fps" => Raw("max_fps") ?? "0",
             "vsync" => Raw("vsync") ?? "game",
             "particles" => Raw("particles") ?? "100",
-            "gc" => Raw("gc") ?? "game",
             "frame_log" => Raw("frame_log") ?? "0",
+            "jit_warmup" => Raw("jit_warmup") ?? "off",
             _ => Raw(key),
         };
     }
@@ -144,8 +145,8 @@ internal static class PerfSettings
             $"fps cap {(MaxFps > 0 ? MaxFps.ToString() : "game")}",
             $"vsync {Vsync}",
             $"particles {ParticlesPercent}%",
-            $"gc {(LowLatencyGc ? "low" : "game")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
+            $"jit warm-up {Value("jit_warmup")}",
         };
         parts.AddRange(PropertyOverrides.Select(o => $"{o.Target}.{o.Property}={o.Value}"));
         return string.Join(", ", parts);

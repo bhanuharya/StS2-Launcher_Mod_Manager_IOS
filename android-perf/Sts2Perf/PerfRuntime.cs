@@ -1,7 +1,6 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
-using System.Runtime;
 using Godot;
 using HarmonyLib;
 using STS2Mobile.Launcher;
@@ -41,7 +40,6 @@ internal static class PerfRuntime
     private static (bool Hdr, Viewport.ScreenSpaceAAEnum Aa, bool Deband)? _stockEffects;
     private static int? _stockMaxFps;
     private static DisplayServer.VSyncMode? _stockVsync;
-    private static GCLatencyMode? _stockGcMode;
     private static readonly Dictionary<string, Variant> StockProperties = new();
     private static int _particlesApplied = 100;
     private static bool _nodeAddedHooked;
@@ -95,6 +93,7 @@ internal static class PerfRuntime
         PerfSettings.Reload();
         PerfEntry.Log($"settings: {PerfSettings.Summary()}");
         FrameLog.Configure();
+        JitEvents.Configure();
         ScheduleTick();
     }
 
@@ -146,6 +145,7 @@ internal static class PerfRuntime
             {
                 PerfEntry.Log($"settings changed: {PerfSettings.Summary()}");
                 FrameLog.Configure();
+                JitEvents.Configure();
             }
             ApplyAll();
         }
@@ -167,9 +167,10 @@ internal static class PerfRuntime
             Run("resolution", () => ApplyResolution(root));
         Run("fps cap", ApplyMaxFps);
         Run("vsync", ApplyVsync);
-        Run("gc", ApplyGc);
         Run("particles", () => ApplyParticles(tree));
         Run("properties", () => ApplyProperties(root));
+        if (_gameUiSeen)
+            Run("jit warm-up", JitWarmup.MaybeStart);
     }
 
     private static void Run(string what, Action action)
@@ -276,27 +277,6 @@ internal static class PerfRuntime
             if (now != stock)
                 DisplayServer.WindowSetVsyncMode(stock);
             PerfEntry.Log("vsync back to the game's setting");
-        }
-    }
-
-    // SustainedLowLatency keeps gen2 collections from blocking the frame for
-    // their full duration (background sweeping instead) at the cost of a
-    // little memory. The same trade-off as the iOS port's freeze hunt.
-    private static void ApplyGc()
-    {
-        if (PerfSettings.LowLatencyGc)
-        {
-            if (GCSettings.LatencyMode == GCLatencyMode.SustainedLowLatency)
-                return;
-            _stockGcMode ??= GCSettings.LatencyMode;
-            GCSettings.LatencyMode = GCLatencyMode.SustainedLowLatency;
-            PerfEntry.Log($"gc low latency (game had {_stockGcMode})");
-        }
-        else if (_stockGcMode is { } stock)
-        {
-            _stockGcMode = null;
-            GCSettings.LatencyMode = stock;
-            PerfEntry.Log("gc back to the game's mode");
         }
     }
 
