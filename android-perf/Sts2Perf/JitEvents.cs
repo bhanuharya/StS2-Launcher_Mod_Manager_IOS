@@ -17,7 +17,7 @@ namespace STS2Perf;
 // nested types joined with '.', generic instances ending in '>'.
 internal sealed class JitEvents : EventListener
 {
-    public readonly record struct Jitted(DateTime TimeUtc, string Type, string Method);
+    public readonly record struct Jitted(DateTime TimeUtc, string Type, string Method, string Signature);
 
     private const string RuntimeSource = "Microsoft-Windows-DotNETRuntime";
     private const long JitKeyword = 0x10;
@@ -78,9 +78,15 @@ internal sealed class JitEvents : EventListener
         var names = e.PayloadNames;
         var ns = names?.IndexOf("MethodNamespace") ?? -1;
         var name = names?.IndexOf("MethodName") ?? -1;
+        var signature = names?.IndexOf("MethodSignature") ?? -1;
         if (ns < 0 || name < 0)
             return;
-        _queue.Enqueue(new Jitted(e.TimeStamp.ToUniversalTime(), e.Payload[ns] as string ?? "", e.Payload[name] as string ?? ""));
+        _queue.Enqueue(new Jitted(
+            e.TimeStamp.ToUniversalTime(),
+            e.Payload[ns] as string ?? "",
+            e.Payload[name] as string ?? "",
+            signature >= 0 ? e.Payload[signature] as string ?? "" : ""
+        ));
     }
 
     private static void Drain()

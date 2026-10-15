@@ -183,10 +183,17 @@ At the end of a turn, discarded cards fly to the pile with a trail, and
 frames ran at about 90 ms for 2–3 seconds. **Card trails → Off** hides the
 trails.
 
-Still open: at the start of the enemy turn (the banner, cards flying off) the
-GPU runs at about 89 ms per frame for 2–3 seconds, with nothing unusual in
-view. **Scene probe → Slow moments** hides one thing at a time while that
-happens and logs what the GPU time drops to.
+With **Card trails → Off** those end-of-turn stretches went away: a full
+session on the same Pad 5 had no GPU frame over 60 ms, where before every
+enemy turn started with 2–3 seconds at ~89 ms per frame. With **Lean
+visuals** at full resolution, a fight measured 12–14 ms of GPU per frame
+(60 fps needs under 16.7) and averaged 45–55 fps; what's left are short
+stutters the first time something happens in a session, which is the JIT
+(see JIT warm-up below).
+
+What the probe measured with Lean visuals on, of ~13 ms: the five
+background layers ~1.2 ms each, the health bars' clip masks 2.5 ms, the top
+bar 2.6 ms, the cards in hand 2.6 ms.
 
 ### Scene probe: what the GPU spends its time on
 
@@ -232,9 +239,11 @@ turns smoother.
 Only methods the game compiled in normal play are warmed, never the whole
 game: compiling a method also runs some of the game's static setup early, so
 untouched code (like Steam's own startup, which the launcher disables) stays
-untouched. If the game misbehaves with it on, turn it off and delete
-`sts2perf_jit.txt`. Generic code (async helpers, LINQ) still compiles on
-first use.
+untouched. That includes the generic code the game instantiates over its own
+types, which was most of what still compiled mid-fight: the async plumbing
+behind every card play and action, LINQ queries, collections of game
+objects. If the game misbehaves with it on, turn it off and delete
+`sts2perf_jit.txt`.
 
 ## Install
 
