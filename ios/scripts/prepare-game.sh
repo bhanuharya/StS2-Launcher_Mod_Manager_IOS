@@ -13,6 +13,12 @@
 #                game's .godot metadata (uid cache, script class cache)
 #   app-extra/   files copied next to the app executable (release_info.json)
 #   game.env     PCK_SIZE and GAME_VERSION, for ios_boot's version check
+#
+# Env: REPACK_ASTC=1 also converts the pck's BC textures to ASTC first
+# (Apple GPUs can't sample BC, so Godot would expand them to raw RGBA in
+# memory — about 4x the VRAM and slower loads). Needs astcenc on PATH and
+# `pip install texture2ddecoder`; skipped with a note when they're absent.
+# REPACK_QUALITY overrides the astcenc effort (fast|medium|thorough|...).
 set -euo pipefail
 
 IOS="$(cd "$(dirname "$0")/.." && pwd)"
@@ -26,6 +32,30 @@ PCK="$GAME_DIR/SlayTheSpire2.pck"
 [ -f "$PCK" ] || fail "missing $PCK"
 DATA_DIR="$(find "$GAME_DIR" -maxdepth 1 -type d -name 'data_*' | head -1)"
 [ -n "$DATA_DIR" ] || fail "no data_* assemblies folder in $GAME_DIR"
+
+# BC -> ASTC texture conversion, before anything records the pck's size
+# (ios_boot checks PCK_SIZE, so the app and the repacked pck must ship
+# together — the workflow puts this pck inside the encrypted artifact).
+if [ "${REPACK_ASTC:-0}" = "1" ]; then
+    if command -v astcenc >/dev/null 2>&1 || command -v astcenc-avx2 >/dev/null 2>&1 \
+        || command -v astcenc-sse2 >/dev/null 2>&1 || command -v astcenc-neon >/dev/null 2>&1; then
+        ASTCENC_OK=1
+    else
+        ASTCENC_OK=0
+    fi
+    if python3 -c "import texture2ddecoder" >/dev/null 2>&1 && [ "$ASTCENC_OK" = "1" ]; then
+        log "BC -> ASTC texture conversion"
+        python3 "$IOS/tools/repack_astc.py" selftest
+        if [ -n "${REPACK_QUALITY:-}" ]; then
+            python3 "$IOS/tools/repack_astc.py" repack "$PCK" "$GAME_DIR/.repacked.pck" --quality "$REPACK_QUALITY"
+        else
+            python3 "$IOS/tools/repack_astc.py" repack "$PCK" "$GAME_DIR/.repacked.pck"
+        fi
+        mv "$GAME_DIR/.repacked.pck" "$PCK"
+    else
+        log "NOTE: REPACK_ASTC=1 but astcenc/texture2ddecoder not found; keeping BC textures"
+    fi
+fi
 
 # Shared framework folder, used to tell the game's DLLs apart from the .NET
 # runtime it ships. Prefer 9.x (the game's target).

@@ -88,7 +88,8 @@ send these instead:
    Secrets are encrypted, are never shown in logs, and aren't given to pull
    requests from other people's forks. Only workflows you start can use them.
 4. **Install the game on your PC through Steam** (same branch you build
-   for). You'll copy its `SlayTheSpire2.pck` to the phone.
+   for) — only needed for your **saves**. The game data itself
+   (`SlayTheSpire2.pck`) comes with the build's download.
 
 ### Build
 
@@ -128,8 +129,9 @@ your password.
    `IPA_PASSWORD`. (Windows Explorer can't open AES-encrypted zips.)
 2. Sideload `StS2.ipa` with Sideloadly, the same way as the probe. The app
    shows up as **StS2**.
-3. Copy the game data: on the PC, go to **Steam → Slay the Spire 2 → Manage →
-   Browse local files** and find `SlayTheSpire2.pck` (about 2 GB). It goes
+3. Copy the game data. The encrypted zip already contains the right
+   `SlayTheSpire2.pck` (with BC textures converted to ASTC — the app checks
+   that it matches the build, so use this one, not the PC's). It goes
    directly into the app's folder, which the Files app shows as **On My
    iPhone → StS2**:
    - **Windows 11:** in the **Apple Devices** app, select your iPhone → **Files** → **StS2** → drag the `.pck` in.
@@ -161,9 +163,19 @@ layout.
 
 ### Updates
 
-When Steam updates the game, run the workflow again, sideload the new
-`StS2.ipa`, and copy the new `SlayTheSpire2.pck`. The build and the `.pck`
-must match, and the app checks this.
+When Steam updates the game, a new build is needed (the app checks that the
+`.pck` matches it). With the `STEAM_REFRESH_TOKEN` secret set, that happens
+by itself: the **iOS update watch** workflow asks Steam — anonymously, once
+a day — for the game's current public build, and starts an **iOS game
+build** when it differs from the last one that succeeded. The next morning
+there's a fresh artifact to sideload, with the matching
+`SlayTheSpire2.pck` inside. A build that fails isn't recorded, so the watch
+tries again the next day; it only tracks the **public** branch (a manual
+build for a beta branch doesn't confuse it). Without the secret it just
+notes that a build is due — run the workflow by hand then, or check
+**Actions → iOS update watch → Run workflow** with *force_build* to test
+it. Updating is one Sideloadly install either way, which a free Apple ID
+needs weekly regardless.
 
 ### If something goes wrong
 
@@ -178,11 +190,14 @@ deleting the app.
 
 - **Game code:** NativeAOT compiles it to native ARM64 before install. There's
   no JIT warm-up and no interpreter, so this is the fastest option available on iOS.
-- **Textures matter most.** The PC `.pck` uses BC-compressed textures. If the
-  probe reports `Texture BC7: YES`, they load as they are. If it says `NO`,
-  Godot expands them in memory: loads get slower and memory use goes up a lot.
-  In that case a build step will convert them to ASTC, the phone's native
-  format (planned, only if needed).
+- **Textures are converted to ASTC during the build** (the *repack_astc*
+  workflow input, on by default). The PC `.pck` uses BC-compressed textures,
+  which Apple GPUs cannot sample: without conversion Godot expands every one
+  to raw RGBA in memory — about 4x the VRAM and much slower loads. The build
+  rewrites them to ASTC 4x4 (the same size, natively supported), so the
+  converted `SlayTheSpire2.pck` in the artifact is the one to copy to the
+  phone. The probe's `Texture BC7: YES/NO` line still tells you what an
+  *unconverted* pack would do on your device.
 - **First-run hitches:** Godot compiles each graphics pipeline the first time
   an effect appears and caches it, so the first fights may stutter briefly.
 - **Short freezes seen on device:** the game sometimes stops for a moment and
@@ -192,7 +207,8 @@ deleting the app.
 
 ## Future improvements
 
-Planned, roughly in this order; none are built yet.
+Planned, roughly in this order (the update watch in 4 is built; the rest
+are not).
 
 1. **Short freezes.** `support/FrameWatch.cs` logs each frame over 100 ms
    with what changed during it (pipelines compiled per kind, texture memory,
@@ -206,10 +222,9 @@ Planned, roughly in this order; none are built yet.
    phone also avoids Steam's location block on the build machine.
 3. **In-app `.pck` download** through the same SteamKit2 depot code the
    Android launcher uses, so the PC isn't needed for game data.
-4. **Automatic builds on game updates.** A scheduled workflow uses
-   `STEAM_REFRESH_TOKEN` to compare the Steam build ID (PICS) with the last
-   build's, and builds a new IPA when it changes. Updating is then one
-   Sideloadly install.
+4. ~~**Automatic builds on game updates.**~~ **Built**: the *iOS update
+   watch* workflow does the daily Steam check and re-builds (see
+   [Updates](#updates)).
 5. **Playability.** Port the most important mobile fixes from the Android
    patches as IL patches: UI scale for phone screens, touch-friendly
    hover/tooltips, and app suspend/resume handling.
@@ -235,6 +250,7 @@ Steam overlay.
 ```
 Steam (your account) ──► data_*/sts2.dll + deps, SlayTheSpire2.pck (CI only)
         │                       tools/SteamFetch (+ steam_guard_code.py for the Steam Guard code)
+        ├─ tools/repack_astc.py         BC → ASTC texture conversion (REPACK_ASTC=1)
         ├─ tools/select_assemblies.py   game's own managed DLLs, no .NET runtime
         ├─ tools/IlPatcher              skip Steam/Sentry init, call Sts2Ios.Hooks
         ├─ support/Sts2IosSupport       Steam stub resolver, AOT-safe atlas JSON, diagnostics
@@ -245,5 +261,8 @@ Steam (your account) ──► data_*/sts2.dll + deps, SlayTheSpire2.pck (CI onl
 ```
 
 `scripts/rehearse-linux.sh` runs the whole chain on Linux against the
-stand-in game in `test/` and boots it in the stock Godot template. Pushes to
+stand-in game in `test/` and boots it in the stock Godot template. The
+texture conversion runs in it too when its tools are installed
+(`pip install texture2ddecoder` plus an [astcenc](https://github.com/ARM-software/astc-encoder)
+binary on PATH); otherwise it is skipped with a note. Pushes to
 `ios/**` run the macOS/iOS build of the stand-in game in CI.

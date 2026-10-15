@@ -7,6 +7,20 @@ This project uses the following third-party libraries and tools:
 - **Copyright**: (c) 2014-present Godot Engine contributors, (c) 2007-2014 Juan Linietsky, Ariel Manzur
 - **Source**: https://github.com/godotengine/godot
 
+## astcenc (astc-encoder)
+- **License**: Apache-2.0
+- **Copyright**: (c) 2011-2026 Arm Limited
+- **Source**: https://github.com/ARM-software/astc-encoder
+- **Note**: Downloaded at build time (not redistributed) for the BC → ASTC
+  texture conversion in `ios/tools/repack_astc.py`.
+
+## texture2ddecoder
+- **License**: MIT
+- **Copyright**: (c) 2020 K0lb3
+- **Source**: https://github.com/K0lb3/texture2ddecoder
+- **Note**: Installed from PyPI at build time (not redistributed) for the
+  same conversion.
+
 ## HarmonyLib (0Harmony)
 - **License**: MIT
 - **Copyright**: (c) Andreas Pardeike

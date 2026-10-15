@@ -27,6 +27,15 @@ on:
       steam_branch:
         description: "Steam branch to download (public, public-beta, ...)"
         default: public
+      repack_astc:
+        description: "Convert the pck's BC textures to ASTC (faster loads, ~4x less texture VRAM)"
+        type: boolean
+        default: true
+      astc_quality:
+        description: "ASTC encode effort (fast keeps the build short)"
+        type: choice
+        options: [fast, medium, thorough]
+        default: fast
   push:
     paths:
       - "ios/**"
@@ -40,6 +49,9 @@ permissions:
   contents: read
   # Steam Guard code requests (ios/tools/steam_guard_code.py).
   issues: write
+  # Records the built Steam build in the IOS_LAST_BUILDID variable, which
+  # the iOS update watch compares against (ios-update-watch.yml).
+  actions: write
 
 concurrency:
   group: ios-game-${{ github.ref }}-${{ github.event_name }}
@@ -50,6 +62,10 @@ env:
   GODOT_BASE_URL: https://github.com/godotengine/godot/releases/download/4.5.1-stable
   STS2_APP_ID: "2868840"
   SOURCE: ${{ github.event_name == 'workflow_dispatch' && inputs.source || 'fake' }}
+  # Push runs (fake game) get the default true, so the conversion self-test
+  # runs on every ios/** change.
+  REPACK_ASTC: ${{ github.event_name != 'workflow_dispatch' && 'true' || inputs.repack_astc }}
+  REPACK_QUALITY: ${{ inputs.astc_quality || 'fast' }}
 
 jobs:
   build:
@@ -107,6 +123,15 @@ jobs:
             echo "::error::SlayTheSpire2.pck was not downloaded (wrong branch, or the account doesn't own the game?)"
             exit 1
           fi
+          # The Steam build this run is for, so the update watch (and the
+          # IOS_LAST_BUILDID recording below) know it.
+          dotnet "$RUNNER_TEMP/steamfetch/SteamFetch.dll" appinfo \
+            --app "$STS2_APP_ID" --branch "${STEAM_BRANCH:-public}" > "$RUNNER_TEMP/appinfo.txt" || true
+          cat "$RUNNER_TEMP/appinfo.txt"
+          bid="$(sed -n 's/^buildid=//p' "$RUNNER_TEMP/appinfo.txt" | head -1)"
+          if [ -n "$bid" ]; then
+            echo "STEAM_BUILDID=$bid" >> "$GITHUB_ENV"
+          fi
 
       - name: Close the Steam Guard issue
         if: always() && env.SOURCE == 'steam'
@@ -150,6 +175,34 @@ jobs:
         if: env.SOURCE == 'fake'
         run: ios/scripts/make-fake-game.sh "$HOME/game"
 
+      # Tools for the BC -> ASTC texture conversion in prepare-game.sh
+      # (REPACK_ASTC). The fake game has no textures, so on push runs this
+      # only exercises the conversion self-test.
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.x"
+
+      - name: Install texture conversion tools
+        run: pip3 install texture2ddecoder
+
+      - name: Cache astcenc
+        uses: actions/cache@v4
+        with:
+          path: ~/astcenc-bin
+          key: astcenc-5.7.0-macos-universal
+
+      - name: Install astcenc
+        run: |
+          if [ ! -x "$HOME/astcenc-bin/astcenc" ]; then
+            mkdir -p "$HOME/astcenc-bin"
+            curl -fsSL -o /tmp/astcenc.zip \
+              https://github.com/ARM-software/astc-encoder/releases/download/5.7.0/astcenc-5.7.0-macos-universal.zip
+            unzip -o -q /tmp/astcenc.zip -d /tmp/astcenc
+            cp /tmp/astcenc/bin/astcenc "$HOME/astcenc-bin/astcenc"
+            chmod +x "$HOME/astcenc-bin/astcenc"
+          fi
+          echo "$HOME/astcenc-bin" >> "$GITHUB_PATH"
+
       - name: Build StS2.ipa
         run: EXT_CACHE="$HOME/ext-cache" ios/scripts/build-game-ios.sh "$HOME/game" build/game
 
@@ -162,11 +215,22 @@ jobs:
           source build/game/work/game.env
           NAME="StS2-ios-${GAME_VERSION}-run${GITHUB_RUN_NUMBER}"
           mkdir -p upload
-          7z a -tzip -mem=AES256 -p"$IPA_PASSWORD" "upload/$NAME.zip" ./build/game/StS2.ipa > /dev/null
+          # -mx=1: both payloads are already compressed; this zip is for
+          # encryption, not compression.
+          7z a -tzip -mem=AES256 -mx=1 -p"$IPA_PASSWORD" "upload/$NAME.zip" ./build/game/StS2.ipa > /dev/null
           rm -f build/game/StS2.ipa
-          echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
-          echo "### StS2.ipa built for game ${GAME_VERSION}" >> "$GITHUB_STEP_SUMMARY"
-          echo "Copy SlayTheSpire2.pck from your Steam install (${PCK_SIZE} bytes) into the app's folder." >> "$GITHUB_STEP_SUMMARY"
+          if [ "$REPACK_ASTC" = "true" ]; then
+            # The converted pck goes with the app: ios_boot size-checks it
+            # against this build, so copy this one, not the PC's file.
+            7z a -tzip -mem=AES256 -mx=1 -p"$IPA_PASSWORD" "upload/$NAME.zip" "$HOME/game/SlayTheSpire2.pck" > /dev/null
+            echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
+            echo "### StS2.ipa built for game ${GAME_VERSION}" >> "$GITHUB_STEP_SUMMARY"
+            echo "Copy **SlayTheSpire2.pck from this zip** (BC textures already converted to ASTC) into the app's folder." >> "$GITHUB_STEP_SUMMARY"
+          else
+            echo "ARTIFACT_NAME=$NAME" >> "$GITHUB_ENV"
+            echo "### StS2.ipa built for game ${GAME_VERSION}" >> "$GITHUB_STEP_SUMMARY"
+            echo "Copy SlayTheSpire2.pck from your Steam install (${PCK_SIZE} bytes) into the app's folder." >> "$GITHUB_STEP_SUMMARY"
+          fi
 
       - name: Stage fake-game IPA
         if: env.SOURCE == 'fake'
@@ -192,6 +256,24 @@ jobs:
           path: build/game/logs
           if-no-files-found: ignore
           retention-days: 7
+
+      - name: Record the built Steam build
+        # Only on success, so a failed build is retried by the watch the
+        # next day. Stored as "branch:buildid"; the watch compares the
+        # public branch's buildid.
+        if: env.SOURCE == 'steam'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          STEAM_BRANCH: ${{ inputs.steam_branch || 'public' }}
+        run: |
+          [ -n "$STEAM_BUILDID" ] || { echo "no STEAM_BUILDID captured; not recording"; exit 0; }
+          value="${STEAM_BRANCH:-public}:$STEAM_BUILDID"
+          if gh api "repos/$GITHUB_REPOSITORY/actions/variables/IOS_LAST_BUILDID" >/dev/null 2>&1; then
+            gh api -X PATCH "repos/$GITHUB_REPOSITORY/actions/variables/IOS_LAST_BUILDID" -f value="$value" >/dev/null
+          else
+            gh api -X POST "repos/$GITHUB_REPOSITORY/actions/variables" -f name=IOS_LAST_BUILDID -f value="$value" >/dev/null
+          fi
+          echo "recorded $value in IOS_LAST_BUILDID"
 
       - name: Remove game files
         if: always()

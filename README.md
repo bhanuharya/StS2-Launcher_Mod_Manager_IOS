@@ -15,7 +15,7 @@ releases and issues live upstream.
 |---|---|---|---|
 | What it is | The upstream launcher and mod manager | The upstream launcher with performance settings and English text | A native iOS build of your own copy of the game |
 | Get it | APK from [upstream Releases](https://github.com/iunius612/StS2-Launcher_Mod_Manager/releases/latest) | APK from [this fork's Releases](../../releases/latest) | Build it with GitHub Actions on your fork, install with Sideloadly |
-| Steam login and download | In the app | In the app | On GitHub's build machine; you copy `SlayTheSpire2.pck` from your PC |
+| Steam login and download | In the app | In the app | On GitHub's build machine; game data comes from the build's download |
 | Steam Cloud saves | Yes | Yes | No, saves are copied by hand |
 | Mods and Workshop | Yes | Yes | No |
 | Performance settings | No | Yes | No |
@@ -200,10 +200,12 @@ port works differently:
 4. Install `StS2.ipa` with **Sideloadly** over USB. Then on the iPhone:
    **Settings → General → VPN & Device Management** → your Apple ID →
    **Trust**.
-5. Copy `SlayTheSpire2.pck` from **Steam → Slay the Spire 2 → Manage → Browse
-   local files** into the app's folder: in the **Apple Devices** app (Windows
-   11) or **iTunes → File Sharing** (Windows 10), choose **StS2** and add the
-   file. It ends up in **Files → On My iPhone → StS2**.
+5. Copy `SlayTheSpire2.pck` **from the same zip** (the build converts its
+   BC textures to ASTC — Apple GPUs can't read BC — and the app checks that
+   the file matches the build) into the app's folder: in the **Apple
+   Devices** app (Windows 11) or **iTunes → File Sharing** (Windows 10),
+   choose **StS2** and add the file. It ends up in **Files → On My iPhone →
+   StS2**.
 6. Open **StS2**. If the `.pck` is missing or from another game version, the
    app tells you instead of starting.
 
@@ -213,7 +215,8 @@ have to match. Full guide, troubleshooting, and how the build works:
 
 ### Future improvements
 
-Planned, roughly in this order. None of these are built yet.
+Planned, roughly in this order. The daily update watch (4) is built; the
+rest are not.
 
 1. **Find and fix the short freezes.** The next build logs every slow frame
    with its cause (graphics pipelines compiled, textures loaded, or .NET
@@ -226,11 +229,11 @@ Planned, roughly in this order. None of these are built yet.
    checking that SteamKit2 works when compiled ahead of time.
 3. **Download `SlayTheSpire2.pck` in the app** from Steam, as the Android
    launcher downloads the game, so the PC is no longer needed for game data.
-4. **Automatic builds on game updates.** With a saved Steam login
-   (`STEAM_REFRESH_TOKEN`), a daily workflow can check Steam for a new game
-   build and produce a new `StS2.ipa` without asking for a code. Updating then
-   means one Sideloadly install, which a free Apple ID needs every 7 days
-   anyway.
+4. **Automatic builds on game updates — built.** A daily workflow asks
+   Steam anonymously for the game's current build and starts a new iOS
+   build (with `STEAM_REFRESH_TOKEN`) whenever it changed; see
+   *Updates* in [ios/README.md](ios/README.md). Updating then means one
+   Sideloadly install, which a free Apple ID needs every 7 days anyway.
 5. **Phone-friendly UI.** Port the Android launcher's mobile fixes as
    build-time patches: UI scale for phone screens, touch-friendly tooltips,
    and suspend/resume handling.
