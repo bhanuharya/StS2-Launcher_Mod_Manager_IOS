@@ -29,8 +29,13 @@ namespace STS2Perf;
 //   card_trails=on|off          off: no trails behind flying cards
 //   bg_sway=on|off              off: background foliage stands still
 //   cpu_probe=off|on            on: the frame log times the game's scripts
-//   asset_cache=game|keep       keep: hold assets the game loads again and
-//                               again (AssetKeep)
+//   asset_cache=game|keep       keep: the game stops unloading the assets it
+//                               loaded on the spot (AssetKeep)
+//   combat_ui=game|limited      limited: the combat UI refreshes at most 10
+//                               times a second (CombatUiRefresh)
+//   export=off|at_menu          at_menu: once the game is up, write the game's
+//                               code and scenes to StS2LauncherMM/Export
+//                               (GameExport), then back to off
 //   root.<property>=<value>     any property of the game's root Window
 //   engine.<property>=<value>   any property of Engine
 //
@@ -91,6 +96,8 @@ internal static class PerfSettings
             "bg_sway" => Raw("bg_sway") ?? "on",
             "cpu_probe" => Raw("cpu_probe") ?? "off",
             "asset_cache" => Raw("asset_cache") ?? "game",
+            "combat_ui" => Raw("combat_ui") ?? "game",
+            "export" => Raw("export") ?? "off",
             _ => Raw(key),
         };
     }
@@ -168,6 +175,7 @@ internal static class PerfSettings
             $"idle overlay {Value("idle_overlay")}",
             $"background sway {Value("bg_sway")}",
             $"loaded assets {Value("asset_cache")}",
+            $"combat ui {Value("combat_ui")}",
             $"cpu breakdown {Value("cpu_probe")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",

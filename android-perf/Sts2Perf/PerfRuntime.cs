@@ -179,6 +179,9 @@ internal static class PerfRuntime
             Run("scene probe", SceneProbe.Tick);
             Run("cpu breakdown", CpuProbe.Apply);
             Run("fight background", SceneProbe.LogBackground);
+            Run("combat ui", CombatUiRefresh.Apply);
+            Run("async timing", AsyncTiming.Apply);
+            Run("export", GameExport.MaybeStart);
         }
     }
 

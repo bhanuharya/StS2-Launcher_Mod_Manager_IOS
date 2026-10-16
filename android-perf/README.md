@@ -26,10 +26,12 @@ Tap **Perf settings** (next to **Debug**, above the launcher's console). Each
 row's button steps through its values; changes are saved right away and apply
 when the game starts, or within 2 seconds while it runs.
 
-**Lean visuals (one tap)** at the top turns on everything below that costs GPU
-time and shows little: Card rendering Fast, Card trails Off, Idle transition
-layer Skip, Background sway Off, and HDR / FXAA / debanding Off. Particles
-and resolution stay as you set them.
+**Recommended (one tap)** at the top turns on everything below that costs GPU
+time and shows little (the "lean visuals": Card rendering Fast, Card trails
+Off, Idle transition layer Skip, Background sway Off, HDR / FXAA / debanding
+Off) and the two fixes to the game's own code that change nothing on screen:
+Keep loaded assets and Combat UI refresh limited. Particles and resolution
+stay as you set them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -42,10 +44,12 @@ and resolution stay as you set them.
 | Card trails | On, Off | Off hides the trail behind cards flying to a pile, where end-of-turn discards dropped to ~10 fps. |
 | Idle transition layer | Draw (game), Skip | Skip stops drawing the game's full-screen transition layer while it's idle and invisible (2.2 ms per frame at full resolution on a Pad 5). It's drawn again the moment any fade in it starts. In 0.4.2.8 it also hid the fade between rooms, so the previous room showed for a second while the next one loaded; fixed in 0.4.2.10. |
 | Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
-| Keep loaded assets | As the game, Keep | Keep holds the assets the game loads again and again (the card tooltip, power icons, attack effects) in memory, so they stop costing a 50–70 ms stutter each time. See below. |
+| Keep loaded assets | As the game, Keep | The game unloads the assets it had to load on the spot (the card tooltip, power icons, attack effects) at every room change, then loads them again: a 50–70 ms stutter each time. Keep stops that unloading. See below. |
+| Combat UI refresh | Every frame (game), 10 per second | The game rebuilds its whole combat UI (every card's text in hand, intents, …) on every frame something changes, which during an enemy's move is most frames. 10 per second caps that. See below. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
 | CPU breakdown (frame log) | Off, On | Times every per-frame callback of the game's scripts and adds the biggest to the frame log's stats line. See below. |
+| Export game files (once) | Off, When the game starts | Writes the game's code and its scenes as text to `StS2LauncherMM/Export/` (a zip), to read what to tune. See below. |
 | Scene probe (once) | Off, Next fight, Slow moments | Measures what each part of the fight screen costs the GPU, once, then turns itself off. Slow moments tests what's behind the next five slowdowns instead. See below. |
 
 "Game setting" / 100% / Full / "As the game sets" leave the game exactly as
@@ -208,7 +212,7 @@ visuals** at full resolution, a fight measured 12–14 ms of GPU per frame
 stutters the first time something happens in a session, which is the JIT
 (see JIT warm-up below).
 
-What the probe measured with Lean visuals on, of ~13 ms: the five
+What the probe measured with the lean visuals on, of ~13 ms: the five
 background layers ~1.2 ms each, the health bars' clip masks 2.5 ms, the top
 bar 2.6 ms, the cards in hand 2.6 ms.
 
@@ -250,15 +254,17 @@ few assets:
 | Spike attack effects (3 scenes) | 9 | 6 (85 ms) |
 | A boss's map icon (Spine data) | 10 | 8 (209 ms) |
 
-Godot keeps a loaded asset only while something uses it, so once a tooltip
-closes or a power wears off, the next one is read from the package again.
-**Keep loaded assets → Keep** holds any asset that needed a real load (over
-2 ms) for the second time, so from the third time on Godot's own cache
-returns it at once. Up to 200 assets, the least recently used dropped
-first; full-screen menus (`res://scenes/screens/`) and textures over 2
-megapixels are never held. It hooks Godot's `ResourceLoader.Load` and
-`LoadThreadedGet`, which the game's loads go through; with the frame log
-on, those loads are timed either way.
+The game's code explains it (`MegaCrit.Sts2.Core.Assets.AssetCache`): each
+room preloads a list of assets; anything else is loaded on the spot, logged
+as not cached and remembered as "missed", and at the next room change
+`PreloadManager` calls `AssetCache.UnloadMissedCacheAssets()`, which removes
+and Disposes every missed asset. So the tooltip and the icons load again in
+every room. **Keep loaded assets → Keep** turns that one method into a
+no-op: a missed asset stays in the game's cache for the session (a few
+hundred small assets at most). 0.4.2.12–0.4.2.13 tried holding references
+to such assets instead, which couldn't work, since the game Disposes those
+very objects. With the frame log on, Godot's `ResourceLoader.Load` and
+`LoadThreadedGet` are timed either way.
 
 ### Enemy turns
 
@@ -266,13 +272,50 @@ In the same session every enemy hit was a stutter frame: an attack adds
 about six effect scenes (slash, hit spark, damage number, specks, glow), and
 that frame took 50–65 ms; a broken block took 68–91 ms. Neither had JIT, GC
 or loads behind it. Frame times come in steps of 16.7 ms with vsync on, so
-that's 35–50 ms of work per hit. From 0.4.2.13 the hitch line says where
-those milliseconds go: the logic / draw / gpu split, `instancing` for
-creating the effects, and with **CPU breakdown** on, the scripts.
+that's 35–50 ms of work per hit.
+
+0.4.2.13's split showed it's the game's logic, not drawing or creating the
+effects: enemy moves were followed by frames with 45–85 ms of logic, the GPU
+at 11–14 ms, effects created in 4–7 ms, the game's `_Process` scripts at
+0.2–0.6 ms per frame in total. The game's code shows what runs there
+(`MegaCrit.Sts2.Core.Combat.CombatStateTracker`): every change in a fight
+(HP, block, a power, energy, a card moving, a history entry) asks for a
+combat UI refresh on the next frame, and that refresh rebuilds the hand
+(every card's description through SmartFormat, with damage previews through
+every power and relic, then the text auto-sized by re-shaping it at several
+font sizes), every intent, the creatures' state displays, the energy
+counter and the end-turn button. During an enemy's move something changes
+on most frames, so the refresh runs frame after frame.
+
+**Combat UI refresh → 10 per second** keeps the game's refresh code as it
+is and changes only how often it runs: a change after a quiet spell still
+shows on the next frame; within 100 ms of the last refresh it waits, and
+everything that changed meanwhile goes into that one refresh. Numbers on
+cards and intents can lag by up to a tenth of a second. The stats line
+counts it: `| combat ui 31 refreshes for 240 changes`.
+
+To check it on the device, the frame log now also times the game's async
+code, the part of the game that runs combat (`async 61 ms
+(CombatStateTracker.CallCombatStateChangedDeferred 52 ms, …)` in hitch
+lines, `| async 3.1 ms/frame` in the stats line), and **CPU breakdown** also
+times the refresh's pieces: each UI handler, `NCard.UpdateVisuals` and the
+text auto-sizing.
+
+### Export game files
+
+**Export game files (once) → When the game starts** writes
+`StS2LauncherMM/Export/sts2-analysis-<time>.zip` once the game is up: the
+game's code (`sts2.dll`, this device's own copy), every scene and resource
+in its package as text (each node's type, properties, script and signal
+connections, sub-resources one level deep), and every shader's source. No
+pictures, sounds or fonts. It takes a few minutes, with progress shown on
+screen; stay on the main menu until it says where the file is. The zip is
+for reading what the game does (backgrounds, effects) to find what to tune;
+it stays on your device unless you share it.
 
 ### Acts: Underdocks costs the GPU twice as much
 
-The same session at Low res with Lean visuals, by act:
+The same session at Low res with the lean visuals, by act:
 
 | Act | Fights, GPU per frame | fps (10 s windows) |
 |---|---|---|
@@ -280,7 +323,7 @@ The same session at Low res with Lean visuals, by act:
 | Hive (act 2) | ~11 ms | 50–57 |
 | Glory (act 3) | ~11 ms | 50–57 |
 
-Overgrowth (the other act 1) measured 12–14 ms with Lean visuals in earlier
+Overgrowth (the other act 1) measured 12–14 ms with the lean visuals in earlier
 sessions, at *full* resolution. So something in Underdocks fights costs
 about 10 ms more per frame than in the other acts. With the frame log on, the log now notes once per fight what its
 background is made of (`[Perf] fight background: …`: its scenes, how much
