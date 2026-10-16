@@ -35,6 +35,27 @@ internal static class CpuProbe
     private const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
     private static readonly string[] Callbacks = { "_Process", "_PhysicsProcess", "_Draw" };
 
+    // Game methods that aren't per-frame callbacks but run on many frames in a
+    // fight: the combat UI refresh's handlers (see CombatUiRefresh) and the
+    // card and text updates they make. Listed alongside the callbacks; they
+    // nest (UpdateVisuals runs inside the hand's handler), so they're left out
+    // of the total.
+    private static readonly string[] Extra =
+    {
+        "MegaCrit.Sts2.Core.Nodes.Combat.NPlayerHand:OnCombatStateChanged",
+        "MegaCrit.Sts2.Core.Nodes.Combat.NIntent:OnCombatStateChanged",
+        "MegaCrit.Sts2.Core.Nodes.Combat.NCreatureStateDisplay:OnCombatStateChanged",
+        "MegaCrit.Sts2.Core.Nodes.Combat.NEnergyCounter:OnCombatStateChanged",
+        "MegaCrit.Sts2.Core.Nodes.Combat.NEndTurnButton:OnCombatStateChanged",
+        "MegaCrit.Sts2.Core.Nodes.Combat.NCreature:ShowCreatureHoverTips",
+        "MegaCrit.Sts2.Core.Nodes.Combat.NPower:ShowPowerHoverTips",
+        "MegaCrit.Sts2.Core.Nodes.Cards.NCard:UpdateVisuals",
+        "MegaCrit.Sts2.addons.mega_text.MegaRichTextLabel:AdjustFontSize",
+        "MegaCrit.Sts2.addons.mega_text.MegaLabel:AdjustFontSize",
+    };
+
+    private static readonly HashSet<MethodBase> ExtraMethods = new();
+
     private sealed class Stat
     {
         public long Ticks;
@@ -88,13 +109,31 @@ internal static class CpuProbe
                 }
             }
         }
-        PerfEntry.Log($"cpu breakdown: timing {count} per-frame callbacks of the game's scripts ({failed} failed), set up in {clock.Elapsed.TotalSeconds:0.0} s");
+        var extra = 0;
+        foreach (var name in Extra)
+        {
+            var method = AccessTools.Method(name);
+            if (method == null)
+                continue;
+            try
+            {
+                _harmony.Patch(method, prefix: prefix, postfix: postfix);
+                ExtraMethods.Add(method);
+                extra++;
+            }
+            catch (Exception ex)
+            {
+                PerfEntry.Log($"cpu breakdown: can't time {name}: {ex.Message}");
+            }
+        }
+        PerfEntry.Log($"cpu breakdown: timing {count} per-frame callbacks of the game's scripts ({failed} failed) and {extra} combat UI methods, set up in {clock.Elapsed.TotalSeconds:0.0} s");
     }
 
     private static void Unpatch()
     {
         _harmony?.UnpatchAll(HarmonyId);
         _patched = false;
+        ExtraMethods.Clear();
         lock (Stats)
         {
             Stats.Clear();
@@ -139,10 +178,10 @@ internal static class CpuProbe
             return null;
         lock (Stats)
         {
-            var total = Ms(Frame.Values.Sum());
-            if (total < 1)
+            var total = Ms(Frame.Where(kv => !ExtraMethods.Contains(kv.Key)).Sum(kv => kv.Value));
+            if (total < 1 && !Frame.Any(kv => Ms(kv.Value) >= 1))
                 return null;
-            var top = Frame.OrderByDescending(kv => kv.Value).Take(3).Select(kv => $"{kv.Key.DeclaringType?.Name}.{kv.Key.Name} {Ms(kv.Value):0.0} ms");
+            var top = Frame.OrderByDescending(kv => kv.Value).Take(4).Select(kv => $"{kv.Key.DeclaringType?.Name}.{kv.Key.Name} {Ms(kv.Value):0.0} ms");
             return $"scripts {total:0} ms ({string.Join(", ", top)})";
         }
     }
@@ -171,6 +210,6 @@ internal static class CpuProbe
         var top = rows.OrderByDescending(r => r.Ticks)
             .Take(8)
             .Select(r => $"{r.Method.DeclaringType?.Name}.{r.Method.Name} {PerFrame(r.Ticks):0.00} ms x{(double)r.Calls / frames:0.#}");
-        return $" | scripts {PerFrame(rows.Sum(r => r.Ticks)):0.0} ms/frame: {string.Join(", ", top)}";
+        return $" | scripts {PerFrame(rows.Where(r => !ExtraMethods.Contains(r.Method)).Sum(r => r.Ticks)):0.0} ms/frame: {string.Join(", ", top)}";
     }
 }

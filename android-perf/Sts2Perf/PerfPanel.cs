@@ -41,6 +41,7 @@ internal static class PerfPanel
         new("idle_overlay", "Idle transition layer", new Option[] { new("draw", "Draw (game)"), new("skip", "Skip") }),
         new("bg_sway", "Background sway", new Option[] { new("on", "On"), new("off", "Off (still)") }),
         new("asset_cache", "Keep loaded assets", new Option[] { new("game", "As the game"), new("keep", "Keep (fewer hitches)") }),
+        new("combat_ui", "Combat UI refresh", new Option[] { new("game", "Every frame (game)"), new("limited", "10 per second") }),
         new("frame_log", "Frame-time log", new Option[]
         {
             new("0", "Off"), new("5", "Every 5 s"), new("10", "Every 10 s"), new("30", "Every 30 s"),
@@ -48,12 +49,16 @@ internal static class PerfPanel
         new("jit_warmup", "JIT warm-up (experimental)", new Option[] { new("off", "Off"), new("on", "At main menu") }),
         new("cpu_probe", "CPU breakdown (frame log)", new Option[] { new("off", "Off"), new("on", "On") }),
         new("probe", "Scene probe (once)", new Option[] { new("off", "Off"), new("next_fight", "Next fight"), new("spikes", "Slow moments") }),
+        new("export", "Export game files (once)", new Option[] { new("off", "Off"), new("at_menu", "When the game starts") }),
     };
 
-    // "Lean visuals": everything that costs GPU time and shows little.
+    // "Recommended": everything that costs GPU time and shows little (the
+    // lean visuals), plus the fixes to the game's own code that change
+    // nothing on screen.
     private static readonly (string Key, string Value)[] Lean =
     {
         ("card_fx", "fast"), ("card_trails", "off"), ("idle_overlay", "skip"), ("bg_sway", "off"), ("effects", "off"),
+        ("asset_cache", "keep"), ("combat_ui", "limited"),
     };
 
     private static readonly List<(Row Row, StyledButton Button)> Buttons = new();
@@ -132,7 +137,7 @@ internal static class PerfPanel
             vbox.AddChild(scroll);
             TouchScroll.Attach(scroll);
 
-            var lean = new StyledButton("Lean visuals (one tap)", scale, fontSize: 14, height: 48, variant: ButtonVariant.Primary);
+            var lean = new StyledButton("Recommended (one tap)", scale, fontSize: 14, height: 48, variant: ButtonVariant.Primary);
             lean.Pressed += () =>
             {
                 foreach (var (key, value) in Lean)
@@ -140,7 +145,7 @@ internal static class PerfPanel
                 foreach (var (row, button) in Buttons)
                     if (GodotObject.IsInstanceValid(button))
                         button.Text = CurrentLabel(row);
-                PerfEntry.Log("Lean visuals: " + string.Join(", ", Lean.Select(l => $"{l.Key}={l.Value}")));
+                PerfEntry.Log("Recommended: " + string.Join(", ", Lean.Select(l => $"{l.Key}={l.Value}")));
             };
             vbox.AddChild(lean);
 

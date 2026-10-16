@@ -234,6 +234,7 @@ internal static class FrameLog
         AssetKeep.ResetFrame();
         CpuProbe.ResetFrame();
         SceneTiming.ResetFrame();
+        AsyncTiming.ResetFrame();
     }
 
     private static void Sample()
@@ -359,6 +360,8 @@ internal static class FrameLog
             causes.Add(loads);
         if (SceneTiming.FrameSummary() is { } instancing)
             causes.Add(instancing);
+        if (AsyncTiming.FrameSummary() is { } async)
+            causes.Insert(0, async);
         if (d.GcMinor > 0 || d.GcMajor > 0)
             causes.Add($"gc minor +{d.GcMinor} major +{d.GcMajor}");
         if (d.Pipelines > 0)
@@ -411,6 +414,8 @@ internal static class FrameLog
                 + (GpuMs.Any(g => g > 0) ? $" | gpu p50 {Pct(GpuMs, 0.5):0.0} p95 {Pct(GpuMs, 0.95):0.0}" : " | gpu n/a")
                 + AssetKeep.TakeWindowSummary()
                 + SceneTiming.TakeWindowSummary(FrameMs.Count)
+                + AsyncTiming.TakeWindowSummary(FrameMs.Count)
+                + CombatUiRefresh.TakeWindowSummary()
                 + CpuProbe.TakeSummary(FrameMs.Count)
                 + (LiveScenes.Count > 0
                     ? " | live scenes: "
