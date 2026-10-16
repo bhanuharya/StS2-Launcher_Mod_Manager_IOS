@@ -45,7 +45,8 @@ stay as you set them.
 | Idle transition layer | Draw (game), Skip | Skip stops drawing the game's full-screen transition layer while it's idle and invisible (2.2 ms per frame at full resolution on a Pad 5). It's drawn again the moment any fade in it starts. In 0.4.2.8 it also hid the fade between rooms, so the previous room showed for a second while the next one loaded; fixed in 0.4.2.10. |
 | Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
 | Keep loaded assets | As the game, Keep | The game unloads the assets it had to load on the spot (the card tooltip, power icons, attack effects) at every room change, then loads them again: a 50–70 ms stutter each time. Keep stops that unloading. See below. |
-| Combat UI refresh | Every frame (game), 10 per second | The game rebuilds its whole combat UI (every card's text in hand, intents, …) on every frame something changes, which during an enemy's move is most frames. 10 per second caps that. See below. |
+| Combat UI refresh | Every frame (game), 10 per second | The game rebuilds its whole combat UI (every card's text in hand, intents, …) on every frame something changes, which during an enemy's move is most frames. 10 per second caps that, and updates the hand's cards a few per frame instead of all in one. See below. |
+| Creature animation | Every frame (game), Every 2nd frame, Every 3rd frame | Updates the enemies' and Silent's Spine animation less often, keeping its speed. With the frame log on, each skeleton's update is timed either way. See below. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
 | CPU breakdown (frame log) | Off, On | Times every per-frame callback of the game's scripts and adds the biggest to the frame log's stats line. See below. |
@@ -294,6 +295,15 @@ everything that changed meanwhile goes into that one refresh. Numbers on
 cards and intents can lag by up to a tenth of a second. The stats line
 counts it: `| combat ui 31 refreshes for 240 changes`.
 
+0.4.2.14 on a Pad 5 showed both sides of it: 63 changes became 17
+refreshes and 98 became 26, but one refresh could still take 41 ms, 39 of
+them updating every card in hand in the same frame (`NCard.UpdateVisuals`,
+about 5 ms a card). From 0.4.2.15 the hand's card updates made during a
+refresh are queued and run over the next frames, 5 ms of them per frame,
+each card once however often it was queued; the rest of the refresh (the
+hand's enabled state, intents, health) still runs at once. The stats line
+adds `, 120 card updates over 40 frames`.
+
 To check it on the device, the frame log now also times the game's async
 code, the part of the game that runs combat (`async 61 ms
 (CombatStateTracker.CallCombatStateChangedDeferred 52 ms, …)` in hitch
@@ -313,6 +323,28 @@ screen; stay on the main menu until it says where the file is. The zip is
 for reading what the game does (backgrounds, effects) to find what to tune;
 it stays on your device unless you share it.
 
+### Creature animation: Spine skeletons
+
+The game's creatures are Spine skeletons (the spine-godot extension's
+`SpineSprite`), updated by the engine on every frame: advance the
+animation, pose the bones, rebuild the meshes. That runs on the main thread
+inside "logic", where the game's scripts and async code don't show it. In a
+0.4.2.14 session on a Pad 5 the Phantasmal Gardeners elite (four of them)
+ran at 13.5 fps with 65 ms of logic on every frame, also while nothing was
+happening (no UI refreshes, no async code, scripts at 0.5 ms), and the
+Slumbering Beetle's fight ran at 17–20 fps while it slept. Those point at
+the skeletons, but nothing timed them yet.
+
+From 0.4.2.15, with the frame log on, the add-on drives the skeletons
+itself: each one the engine updated every frame is switched to manual
+updates and updated by the add-on, timed, so the log shows it
+(`| spine 4 skeletons 41.3 ms/frame (phantasmal_gardener 10.2 ms x4, …)`,
+`spine 52 ms` in hitch lines). **Creature animation → Every 2nd frame** (or
+3rd) updates each skeleton less often, with the time since its last update,
+so animations keep their speed at a lower frame rate; the skeletons take
+turns, so the cost spreads over frames. If the update fails, the skeletons
+go back to the engine.
+
 ### Acts: Underdocks costs the GPU twice as much
 
 The same session at Low res with the lean visuals, by act:
@@ -331,6 +363,14 @@ of the screen each covers, shaders and which read the screen, particles,
 Spine skeletons). **Scene probe → Next fight** in an Underdocks fight now
 also measures every layer of the background, whatever its node type, and
 the background with its shaders removed.
+
+The first Underdocks fights logged that way (0.4.2.14, full resolution)
+ran the GPU at 38–49 ms per frame, 18–24 fps. Their background has 18–20
+items drawn with an additive fire shader (`vfx_stepped_shader_fire_add`),
+22–25 particle emitters, 7–8 clip masks (each one drawn offscreen first,
+like the cards were) and 5–6 full-screen layers; the other acts' backgrounds
+have no clip masks and a few emitters. Until that's measured part by part,
+Low res is the setting for Underdocks.
 
 ### Scene probe: what the GPU spends its time on
 
@@ -369,8 +409,9 @@ Then it switches itself off. Collect the log the same way as above
 With **JIT warm-up** on, every game method Mono compiles is added to
 `sts2perf_jit.txt` in the app's files. From the next launch on, once the main
 menu is up, those are compiled again before you play, 6 ms per frame so the
-menu keeps drawing (the log says when it's done, usually well under a
-minute). The list grows as you play, so the first session with it on only
+menu keeps drawing (the log says when it's done; with a long list it can
+take a few minutes). It pauses during fights and carries on in the map,
+rewards and shops. The list grows as you play, so the first session with it on only
 records; a session that played a shiv turn makes the next session's shiv
 turns smoother.
 

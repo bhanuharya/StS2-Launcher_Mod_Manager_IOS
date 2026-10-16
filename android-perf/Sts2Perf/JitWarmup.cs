@@ -6,6 +6,7 @@ using System.Linq;
 using System.Reflection;
 using System.Runtime;
 using Godot;
+using HarmonyLib;
 
 namespace STS2Perf;
 
@@ -23,7 +24,10 @@ namespace STS2Perf;
 // GetFunctionPointer makes Mono compile a method on the spot
 // (RuntimeHelpers.PrepareMethod is a no-op on Mono). It runs on the main
 // thread, SliceMs per frame, so the menu keeps drawing. The list grows as you
-// play; the first session with it on only records.
+// play; the first session with it on only records. It pauses during fights
+// (CombatManager.IsInProgress), which it otherwise slowed down when a run
+// started before it was done (it can take a few minutes), and carries on in
+// the map, rewards and shops.
 //
 // Only methods the game itself compiled in normal play are warmed, never the
 // whole assembly: compiling a method also runs the static initializers of
@@ -133,6 +137,15 @@ internal static class JitWarmup
             Finish("stopped (turned off)");
             return;
         }
+        if (InFight())
+        {
+            if (!_pausedLogged)
+            {
+                _pausedLogged = true;
+                PerfEntry.Log($"jit warm-up: paused during fights ({_next} of {_todo.Count} done), carries on after");
+            }
+            return;
+        }
         Busy.Start();
         var slice = Stopwatch.StartNew();
         try
@@ -187,6 +200,31 @@ internal static class JitWarmup
             // A static initializer that threw stays broken: log every one.
             if (Failures.Count < 5 || ex is TypeInitializationException)
                 Failures.Add($"{entry}: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    private static bool _pausedLogged;
+    private static Func<bool> _inFight;
+
+    private static bool InFight()
+    {
+        if (_inFight == null)
+        {
+            var manager = AccessTools.TypeByName("MegaCrit.Sts2.Core.Combat.CombatManager");
+            var instance = manager == null ? null : AccessTools.PropertyGetter(manager, "Instance");
+            var inProgress = manager == null ? null : AccessTools.PropertyGetter(manager, "IsInProgress");
+            _inFight = instance == null || inProgress?.ReturnType != typeof(bool)
+                ? () => false
+                : () => instance.Invoke(null, null) is { } m && (bool)inProgress.Invoke(m, null);
+        }
+        try
+        {
+            return _inFight();
+        }
+        catch
+        {
+            _inFight = () => false;
+            return false;
         }
     }
 
