@@ -148,6 +148,10 @@ internal static class CombatUiRefresh
             await (Task)_refresh.Invoke(tracker, null);
             _refreshes++;
         }
+        catch (OperationCanceledException)
+        {
+            // The game cancels it when a fight ends; so does its own.
+        }
         catch (Exception ex)
         {
             PerfEntry.Log($"combat UI refresh failed: {ex.InnerException?.Message ?? ex.Message}");

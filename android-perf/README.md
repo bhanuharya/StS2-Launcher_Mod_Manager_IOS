@@ -29,8 +29,8 @@ when the game starts, or within 2 seconds while it runs.
 **Recommended (one tap)** at the top turns on everything below that costs GPU
 time and shows little (the "lean visuals": Card rendering Fast, Card trails
 Off, Idle transition layer Skip, Background sway Off, HDR / FXAA / debanding
-Off) and the two fixes to the game's own code that change nothing on screen:
-Keep loaded assets and Combat UI refresh limited. Particles and resolution
+Off) and the fixes to the game's own code that change nothing on screen:
+Keep loaded assets, Combat UI refresh limited and Text colors built-in. Particles and resolution
 stay as you set them.
 
 | Setting | Values | What it does |
@@ -46,6 +46,7 @@ stay as you set them.
 | Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
 | Keep loaded assets | As the game, Keep | The game unloads the assets it had to load on the spot (the card tooltip, power icons, attack effects) at every room change, then loads them again: a 50–70 ms stutter each time. Keep stops that unloading. See below. |
 | Combat UI refresh | Every frame (game), 10 per second | The game rebuilds its whole combat UI (every card's text in hand, intents, …) on every frame something changes, which during an enemy's move is most frames. 10 per second caps that, and updates the hand's cards a few per frame instead of all in one. See below. |
+| Text colors | Game's effects, Built-in (same look) | The game colors words and numbers with C# text effects that Godot runs for every character on every frame. Built-in draws the same colors with Godot's own `[color]`. See below. |
 | Creature animation | Every frame (game), Every 2nd frame, Every 3rd frame | Updates the enemies' and Silent's Spine animation less often, keeping its speed. With the frame log on, each skeleton's update is timed either way. See below. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
@@ -344,6 +345,35 @@ updates and updated by the add-on, timed, so the log shows it
 so animations keep their speed at a lower frame rate; the skeletons take
 turns, so the cost spreads over frames. If the update fails, the skeletons
 go back to the engine.
+
+Measured in a full winning run with 0.4.2.15: 1–4 ms per frame for all
+skeletons together, in every fight (the Decimillipede elite's five: 4 ms).
+So the skeletons aren't where those fights' logic goes, and the setting
+stays off in Recommended.
+
+### Text colors
+
+The Decimillipede elite in that run spent 44–51 ms per frame in logic, of
+which the timed parts (skeletons 4 ms, async code 3 ms, the hand's card
+updates ~2 ms, scene creation 2 ms, scripts 0.6 ms) explain about 12. The
+game's code points at the rest: it colors text with custom effects
+(`[gold]6[/gold]`, `[blue]`, `[red]`, `[green]`, `[aqua]`, `[orange]`,
+`[pink]`, `[purple]`), RichTextEffect classes whose `_ProcessCustomFX` sets
+one constant color. Godot redraws a label holding any custom effect on every
+frame and calls the effect's C# method for every character in it, through
+the engine-to-C# bridge: every colored number on every card, intent, power
+and tooltip, every frame.
+
+**Text colors → Built-in** converts those tags to Godot's own
+`[color=#EFC851]…[/color]` where the game sets a label's text
+(`MegaRichTextLabel.SetTextAutoSize`), and in the labels already on screen,
+using the game's own color values (`StsColors`). Only color spans with no
+other color tag inside or around them: with the game's effects the outer
+color wins, with `[color]` the inner one, so nested ones stay as written.
+Animated effects (`[sine]`, `[jitter]`, fades) stay effects. To check it,
+**CPU breakdown** now also times `_ProcessCustomFX` and the game's
+`_Notification` overrides, with calls per frame (`RichTextGold.
+_ProcessCustomFX 3.2 ms x1500`).
 
 ### Acts: Underdocks costs the GPU twice as much
 

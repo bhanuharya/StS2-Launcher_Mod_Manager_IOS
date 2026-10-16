@@ -36,6 +36,8 @@ namespace STS2Perf;
 //                               frame (CombatUiRefresh)
 //   spine_rate=game|half|third  creatures' Spine animation every frame, or
 //                               every 2nd / 3rd frame (SpineDriver)
+//   text_fx=game|native         native: colored text with Godot's [color]
+//                               instead of the game's C# effects (TextColors)
 //   export=off|at_menu          at_menu: once the game is up, write the game's
 //                               code and scenes to StS2LauncherMM/Export
 //                               (GameExport), then back to off
@@ -101,6 +103,7 @@ internal static class PerfSettings
             "asset_cache" => Raw("asset_cache") ?? "game",
             "combat_ui" => Raw("combat_ui") ?? "game",
             "spine_rate" => Raw("spine_rate") ?? "game",
+            "text_fx" => Raw("text_fx") ?? "game",
             "export" => Raw("export") ?? "off",
             _ => Raw(key),
         };
@@ -181,6 +184,7 @@ internal static class PerfSettings
             $"loaded assets {Value("asset_cache")}",
             $"combat ui {Value("combat_ui")}",
             $"creature animation {Value("spine_rate")}",
+            $"text colors {Value("text_fx")}",
             $"cpu breakdown {Value("cpu_probe")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",

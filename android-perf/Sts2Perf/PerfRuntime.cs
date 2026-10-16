@@ -181,6 +181,7 @@ internal static class PerfRuntime
             Run("fight background", SceneProbe.LogBackground);
             Run("combat ui", CombatUiRefresh.Apply);
             Run("creature animation", SpineDriver.Apply);
+            Run("text colors", TextColors.Apply);
             Run("async timing", AsyncTiming.Apply);
             Run("export", GameExport.MaybeStart);
         }
