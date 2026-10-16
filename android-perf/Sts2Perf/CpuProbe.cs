@@ -33,7 +33,11 @@ internal static class CpuProbe
 {
     private const string HarmonyId = "com.sts2perf.cpuprobe";
     private const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
-    private static readonly string[] Callbacks = { "_Process", "_PhysicsProcess", "_Draw" };
+    // Engine-to-C# callbacks: the per-frame ones, _Notification (every
+    // notification an overriding node gets, e.g. each label redraw), and the
+    // text effects' _ProcessCustomFX (once per character per redraw).
+    private static readonly string[] Callbacks = { "_Process", "_PhysicsProcess", "_Draw", "_Notification" };
+    private static readonly string[] EffectCallbacks = { "_ProcessCustomFX" };
 
     // Game methods that aren't per-frame callbacks but run on many frames in a
     // fight: the combat UI refresh's handlers (see CombatUiRefresh) and the
@@ -93,9 +97,12 @@ internal static class CpuProbe
         var failed = 0;
         foreach (var type in Types(game))
         {
-            if (type.ContainsGenericParameters || !typeof(Node).IsAssignableFrom(type))
+            if (type.ContainsGenericParameters)
                 continue;
-            foreach (var method in type.GetMethods(Declared).Where(m => Callbacks.Contains(m.Name) && !m.IsAbstract))
+            var names = typeof(Node).IsAssignableFrom(type) ? Callbacks : typeof(RichTextEffect).IsAssignableFrom(type) ? EffectCallbacks : null;
+            if (names == null)
+                continue;
+            foreach (var method in type.GetMethods(Declared).Where(m => names.Contains(m.Name) && !m.IsAbstract))
             {
                 try
                 {

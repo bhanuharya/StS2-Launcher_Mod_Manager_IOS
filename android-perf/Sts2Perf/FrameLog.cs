@@ -420,6 +420,7 @@ internal static class FrameLog
                 + AsyncTiming.TakeWindowSummary(FrameMs.Count)
                 + CombatUiRefresh.TakeWindowSummary()
                 + SpineDriver.TakeWindowSummary(FrameMs.Count)
+                + TextColors.TakeWindowSummary()
                 + CpuProbe.TakeSummary(FrameMs.Count)
                 + (LiveScenes.Count > 0
                     ? " | live scenes: "
