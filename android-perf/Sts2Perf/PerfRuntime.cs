@@ -175,6 +175,7 @@ internal static class PerfRuntime
         {
             Run("jit warm-up", JitWarmup.MaybeStart);
             Run("scene probe", SceneProbe.Tick);
+            Run("cpu breakdown", CpuProbe.Apply);
         }
     }
 
