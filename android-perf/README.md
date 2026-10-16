@@ -42,6 +42,7 @@ and resolution stay as you set them.
 | Card trails | On, Off | Off hides the trail behind cards flying to a pile, where end-of-turn discards dropped to ~10 fps. |
 | Idle transition layer | Draw (game), Skip | Skip stops drawing the game's full-screen transition layer while it's idle and invisible (2.2 ms per frame at full resolution on a Pad 5). It's drawn again the moment any fade in it starts. In 0.4.2.8 it also hid the fade between rooms, so the previous room showed for a second while the next one loaded; fixed in 0.4.2.10. |
 | Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
+| Keep loaded assets | As the game, Keep | Keep holds the assets the game loads again and again (the card tooltip, power icons, attack effects) in memory, so they stop costing a 50–70 ms stutter each time. See below. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
 | CPU breakdown (frame log) | Off, On | Times every per-frame callback of the game's scripts and adds the biggest to the frame log's stats line. See below. |
@@ -88,6 +89,7 @@ can switch settings mid-fight with no restart and no rebuild:
 | `idle_overlay` | `draw`, `skip` | `draw` |
 | `bg_sway` | `on`, `off` | `on` |
 | `cpu_probe` | `off`, `on` | `off` |
+| `asset_cache` | `game`, `keep` | `game` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
 
@@ -139,6 +141,11 @@ latency data), so this is the way to compare settings. What the parts mean:
   pause times, and .NET's GC latency modes don't exist on Mono.
 - **shaders compiled**, **texture memory**: Godot compiling a graphics
   pipeline or loading textures during the frame.
+- **loads**: assets the game read from its package during the frame, the
+  slowest first (`loads 2 41 ms (card_hover_tip.tscn 38 ms, …)`). The stats
+  line counts them per window: `| loads 14 (6 slow, 212 ms), kept 37`.
+- **scripts**: with **CPU breakdown** on, the game scripts that took the
+  most time in that frame.
 - **nodes**: nodes the game added, named by the scenes it instanced (cards,
   effects, damage numbers).
 - None of these: the game's own code or the GPU.
@@ -217,7 +224,52 @@ including what each calls) and adds the biggest to the stats line:
 `x12` is calls per frame, so roughly how many of that node are alive. Logic
 time these don't cover is the engine's own work (tweens, animations,
 layout) and signal handlers. Patching takes a moment when the game first
-comes up with it on; turning it off removes it.
+comes up with it on; turning it off removes it. Hitch lines also get that
+frame's slowest scripts (`scripts 31 ms (NFoo._Process 22.0 ms, …)`).
+
+### Stutters from assets loaded again and again
+
+The game keeps its own cache of assets and loads anything missing from it
+out of the game's package (logcat: `Asset not cached: <path>`). In one
+80-minute Silent session on a Pad 5 that happened 482 times, for the same
+few assets:
+
+| Asset | Loads | Followed by a stutter (median) |
+|---|---|---|
+| Card tooltip (`card_hover_tip.tscn`) | 67 | 51 (59 ms) |
+| Silent's energy icon | 59 | 30 (71 ms) |
+| Strength, Dexterity, Weak, Accuracy, Thorns … power icons | 25–51 each | about half (55–70 ms) |
+| Spike attack effects (3 scenes) | 9 | 6 (85 ms) |
+| A boss's map icon (Spine data) | 10 | 8 (209 ms) |
+
+Godot keeps a loaded asset only while something uses it, so once a tooltip
+closes or a power wears off, the next one is read from the package again.
+**Keep loaded assets → Keep** holds any asset that needed a real load (over
+2 ms) for the second time, so from the third time on Godot's own cache
+returns it at once. Up to 200 assets, the least recently used dropped
+first; full-screen menus (`res://scenes/screens/`) and textures over 2
+megapixels are never held. It hooks Godot's `ResourceLoader.Load` and
+`LoadThreadedGet`, which the game's loads go through; with the frame log
+on, those loads are timed either way.
+
+### Acts: Underdocks costs the GPU twice as much
+
+The same session at Low res with Lean visuals, by act:
+
+| Act | Fights, GPU per frame | fps (10 s windows) |
+|---|---|---|
+| Underdocks (act 1) | 17–23 ms (median 21) | 30–40 |
+| Hive (act 2) | ~11 ms | 50–57 |
+| Glory (act 3) | ~11 ms | 50–57 |
+
+Overgrowth (the other act 1) measured 12–14 ms with Lean visuals in earlier
+sessions, at *full* resolution. So something in Underdocks fights costs
+about 10 ms more per frame than in the other acts. With the frame log on, the log now notes once per fight what its
+background is made of (`[Perf] fight background: …`: its scenes, how much
+of the screen each covers, shaders and which read the screen, particles,
+Spine skeletons). **Scene probe → Next fight** in an Underdocks fight now
+also measures every layer of the background, whatever its node type, and
+the background with its shaders removed.
 
 ### Scene probe: what the GPU spends its time on
 
@@ -236,7 +288,8 @@ seconds into the next fight (leave the screen alone for about a minute):
    `probe:   +11.8 ms: Background/Layers (Control), 40 nodes`.
 3. It tries candidate fixes one at a time and logs what each saves: card
    CanvasGroups drawn directly, clip masks off, the most used shaders
-   removed, background layers hidden (together and one by one), the
+   removed, background layers hidden (together and one by one, every layer
+   of the fight's background), the background's shaders removed, the
    transition overlay hidden.
 
 With the frame log on, a run of GPU frames over 60 ms also logs a `spike:`

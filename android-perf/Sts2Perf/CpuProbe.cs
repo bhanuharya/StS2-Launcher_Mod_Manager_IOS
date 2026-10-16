@@ -23,6 +23,10 @@ namespace STS2Perf;
 //
 // "x12" is calls per frame (instances). Logic time not covered by these is
 // the engine's own work (tweens, animations, layout) and signal handlers.
+// Hitch lines get the slow frame's own biggest ones:
+//
+//   [Perf] hitch 64 ms: scripts 31 ms (NCardFlyVfx._Process 22.0 ms, ...); ...
+//
 // Patching takes a moment, once, when the game is up with this on; timing
 // costs about a microsecond per call. Turning it off removes the patches.
 internal static class CpuProbe
@@ -40,6 +44,7 @@ internal static class CpuProbe
     private static Harmony _harmony;
     private static bool _patched;
     private static readonly Dictionary<MethodBase, Stat> Stats = new();
+    private static readonly Dictionary<MethodBase, long> Frame = new();
 
     public static bool Active => _patched;
 
@@ -91,7 +96,10 @@ internal static class CpuProbe
         _harmony?.UnpatchAll(HarmonyId);
         _patched = false;
         lock (Stats)
+        {
             Stats.Clear();
+            Frame.Clear();
+        }
         PerfEntry.Log("cpu breakdown: off");
     }
 
@@ -118,7 +126,33 @@ internal static class CpuProbe
                 Stats[__originalMethod] = stat = new Stat();
             stat.Ticks += elapsed;
             stat.Calls++;
+            Frame[__originalMethod] = Frame.TryGetValue(__originalMethod, out var ticks) ? ticks + elapsed : elapsed;
         }
+    }
+
+    private static double Ms(long ticks) => ticks * 1000.0 / Stopwatch.Frequency;
+
+    // For FrameLog's hitch line: this frame's biggest callbacks, or null.
+    public static string FrameSummary()
+    {
+        if (!_patched)
+            return null;
+        lock (Stats)
+        {
+            var total = Ms(Frame.Values.Sum());
+            if (total < 1)
+                return null;
+            var top = Frame.OrderByDescending(kv => kv.Value).Take(3).Select(kv => $"{kv.Key.DeclaringType?.Name}.{kv.Key.Name} {Ms(kv.Value):0.0} ms");
+            return $"scripts {total:0} ms ({string.Join(", ", top)})";
+        }
+    }
+
+    public static void ResetFrame()
+    {
+        if (!_patched)
+            return;
+        lock (Stats)
+            Frame.Clear();
     }
 
     // For FrameLog's stats line: the window's biggest callbacks, per frame,
@@ -133,7 +167,7 @@ internal static class CpuProbe
             rows = Stats.Select(kv => (kv.Key, kv.Value.Ticks, kv.Value.Calls)).ToList();
             Stats.Clear();
         }
-        double PerFrame(long ticks) => ticks * 1000.0 / Stopwatch.Frequency / frames;
+        double PerFrame(long ticks) => Ms(ticks) / frames;
         var top = rows.OrderByDescending(r => r.Ticks)
             .Take(8)
             .Select(r => $"{r.Method.DeclaringType?.Name}.{r.Method.Name} {PerFrame(r.Ticks):0.00} ms x{(double)r.Calls / frames:0.#}");

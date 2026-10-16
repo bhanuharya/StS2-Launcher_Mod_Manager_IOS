@@ -29,6 +29,8 @@ namespace STS2Perf;
 //   card_trails=on|off          off: no trails behind flying cards
 //   bg_sway=on|off              off: background foliage stands still
 //   cpu_probe=off|on            on: the frame log times the game's scripts
+//   asset_cache=game|keep       keep: hold assets the game loads again and
+//                               again (AssetKeep)
 //   root.<property>=<value>     any property of the game's root Window
 //   engine.<property>=<value>   any property of Engine
 //
@@ -88,6 +90,7 @@ internal static class PerfSettings
             "idle_overlay" => Raw("idle_overlay") ?? "draw",
             "bg_sway" => Raw("bg_sway") ?? "on",
             "cpu_probe" => Raw("cpu_probe") ?? "off",
+            "asset_cache" => Raw("asset_cache") ?? "game",
             _ => Raw(key),
         };
     }
@@ -164,6 +167,7 @@ internal static class PerfSettings
             $"card trails {Value("card_trails")}",
             $"idle overlay {Value("idle_overlay")}",
             $"background sway {Value("bg_sway")}",
+            $"loaded assets {Value("asset_cache")}",
             $"cpu breakdown {Value("cpu_probe")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",
