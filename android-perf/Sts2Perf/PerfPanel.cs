@@ -42,6 +42,7 @@ internal static class PerfPanel
         new("bg_sway", "Background sway", new Option[] { new("on", "On"), new("off", "Off (still)") }),
         new("asset_cache", "Keep loaded assets", new Option[] { new("game", "As the game"), new("keep", "Keep (fewer hitches)") }),
         new("combat_ui", "Combat UI refresh", new Option[] { new("game", "Every frame (game)"), new("limited", "10 per second") }),
+        new("spine_rate", "Creature animation", new Option[] { new("game", "Every frame (game)"), new("half", "Every 2nd frame"), new("third", "Every 3rd frame") }),
         new("frame_log", "Frame-time log", new Option[]
         {
             new("0", "Off"), new("5", "Every 5 s"), new("10", "Every 10 s"), new("30", "Every 30 s"),

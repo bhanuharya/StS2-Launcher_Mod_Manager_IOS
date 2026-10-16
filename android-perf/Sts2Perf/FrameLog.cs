@@ -235,6 +235,7 @@ internal static class FrameLog
         CpuProbe.ResetFrame();
         SceneTiming.ResetFrame();
         AsyncTiming.ResetFrame();
+        SpineDriver.ResetFrame();
     }
 
     private static void Sample()
@@ -362,6 +363,8 @@ internal static class FrameLog
             causes.Add(instancing);
         if (AsyncTiming.FrameSummary() is { } async)
             causes.Insert(0, async);
+        if (SpineDriver.FrameSummary() is { } spine)
+            causes.Insert(0, spine);
         if (d.GcMinor > 0 || d.GcMajor > 0)
             causes.Add($"gc minor +{d.GcMinor} major +{d.GcMajor}");
         if (d.Pipelines > 0)
@@ -416,6 +419,7 @@ internal static class FrameLog
                 + SceneTiming.TakeWindowSummary(FrameMs.Count)
                 + AsyncTiming.TakeWindowSummary(FrameMs.Count)
                 + CombatUiRefresh.TakeWindowSummary()
+                + SpineDriver.TakeWindowSummary(FrameMs.Count)
                 + CpuProbe.TakeSummary(FrameMs.Count)
                 + (LiveScenes.Count > 0
                     ? " | live scenes: "
