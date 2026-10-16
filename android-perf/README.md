@@ -118,8 +118,12 @@ and with `frame_log` set, a line like this every N seconds:
 and one line for every frame over 50 ms, with what happened during it:
 
 ```
-[Perf] hitch 183 ms: jit +412 methods 151 ms (Sts2.Core.Combat.Foo x40, ...); gc minor +1; nodes +214 (card x3, shiv_hit x6) | 210 draw calls
+[Perf] hitch 183 ms: jit +412 methods 151 ms (Sts2.Core.Combat.Foo x40, ...); gc minor +1; nodes +214 (card x3, shiv_hit x6) | logic 160 draw 14 other 9 gpu 12 ms | 210 draw calls
 ```
+
+The end of a hitch line splits that frame the same way as the stats line:
+the game's logic, the CPU side of drawing, everything else (input, physics,
+waiting), and the GPU's own time.
 
 Frame times are the game's main-loop iterations, which on Android is also the
 render thread. `hitches` counts frames slower than 1.5× the median. Android
@@ -144,6 +148,10 @@ latency data), so this is the way to compare settings. What the parts mean:
 - **loads**: assets the game read from its package during the frame, the
   slowest first (`loads 2 41 ms (card_hover_tip.tscn 38 ms, …)`). The stats
   line counts them per window: `| loads 14 (6 slow, 212 ms), kept 37`.
+- **instancing**: the game's code creating scenes (`PackedScene.Instantiate`)
+  and adding them to the tree (`AddChild`, which runs their `_Ready`), per
+  scene: `instancing 6 31 ms (vfx_attack_slash 12 ms, …)`. The stats line
+  has the average per frame.
 - **scripts**: with **CPU breakdown** on, the game scripts that took the
   most time in that frame.
 - **nodes**: nodes the game added, named by the scenes it instanced (cards,
@@ -251,6 +259,16 @@ first; full-screen menus (`res://scenes/screens/`) and textures over 2
 megapixels are never held. It hooks Godot's `ResourceLoader.Load` and
 `LoadThreadedGet`, which the game's loads go through; with the frame log
 on, those loads are timed either way.
+
+### Enemy turns
+
+In the same session every enemy hit was a stutter frame: an attack adds
+about six effect scenes (slash, hit spark, damage number, specks, glow), and
+that frame took 50–65 ms; a broken block took 68–91 ms. Neither had JIT, GC
+or loads behind it. Frame times come in steps of 16.7 ms with vsync on, so
+that's 35–50 ms of work per hit. From 0.4.2.13 the hitch line says where
+those milliseconds go: the logic / draw / gpu split, `instancing` for
+creating the effects, and with **CPU breakdown** on, the scripts.
 
 ### Acts: Underdocks costs the GPU twice as much
 

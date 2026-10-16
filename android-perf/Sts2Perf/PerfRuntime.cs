@@ -171,6 +171,7 @@ internal static class PerfRuntime
         Run("cards", () => CardFx.Apply(tree));
         Run("idle overlay", () => OverlayFx.Apply(tree));
         Run("asset cache", AssetKeep.Apply);
+        Run("scene timing", SceneTiming.Apply);
         Run("properties", () => ApplyProperties(root));
         if (_gameUiSeen)
         {

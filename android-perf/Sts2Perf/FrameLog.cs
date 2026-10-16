@@ -42,8 +42,10 @@ namespace STS2Perf;
 // that alone (see JitWarmup). gc: Mono's collections, minor (nursery) and
 // major; Mono keeps no pause time. nodes: nodes added, named by the scene
 // files instanced, so a burst of effects shows what it was. loads: assets
-// read from the game's package during the frame (AssetKeep). scripts: with
-// the CPU breakdown on, the frame's slowest game scripts (CpuProbe).
+// read from the game's package during the frame (AssetKeep). instancing:
+// the game's code creating scenes and adding them (SceneTiming). scripts:
+// with the CPU breakdown on, the frame's slowest game scripts (CpuProbe).
+// Each hitch line ends with the frame's own logic / draw / other / gpu split.
 //
 // It also notes, once per fight, what the fight's background is made of
 // (SceneProbe.LogBackground): some acts cost the GPU twice what others do.
@@ -77,6 +79,8 @@ internal static class FrameLog
     private static int _slowGpuFrames;
     private const float SpikeGpuMs = 60f;
     private static ulong _preDrawUsec;
+    private static float _frameLogicMs;
+    private static float _frameDrawMs;
     private static DateTime _frameStartUtc;
     private static readonly List<(ulong DueUsec, DateTime FromUtc, DateTime ToUtc, float Ms, Counters D, List<string> Causes, string Suffix)> Pending = new();
     private const ulong JitNamesDelayUsec = 1_500_000;
@@ -182,16 +186,18 @@ internal static class FrameLog
     private static void OnPreDraw()
     {
         var now = Time.GetTicksUsec();
-        if (_processStartUsec != 0 && now > _processStartUsec)
-            LogicMs.Add((now - _processStartUsec) / 1000f);
+        _frameLogicMs = _processStartUsec != 0 && now > _processStartUsec ? (now - _processStartUsec) / 1000f : 0;
+        if (_frameLogicMs > 0)
+            LogicMs.Add(_frameLogicMs);
         _preDrawUsec = now;
     }
 
     private static void OnPostDraw()
     {
         var now = Time.GetTicksUsec();
-        if (_preDrawUsec != 0 && now > _preDrawUsec)
-            DrawMs.Add((now - _preDrawUsec) / 1000f);
+        _frameDrawMs = _preDrawUsec != 0 && now > _preDrawUsec ? (now - _preDrawUsec) / 1000f : 0;
+        if (_frameDrawMs > 0)
+            DrawMs.Add(_frameDrawMs);
         _preDrawUsec = 0;
     }
 
@@ -227,6 +233,7 @@ internal static class FrameLog
         ScenesFrame.Clear();
         AssetKeep.ResetFrame();
         CpuProbe.ResetFrame();
+        SceneTiming.ResetFrame();
     }
 
     private static void Sample()
@@ -272,7 +279,7 @@ internal static class FrameLog
             if (_hitchLines < HitchLinesPerWindow)
             {
                 _hitchLines++;
-                LogHitch(now, _frameStartUtc, nowUtc, ms, counters.Since(_frameStart), drawCalls);
+                LogHitch(now, _frameStartUtc, nowUtc, ms, counters.Since(_frameStart), drawCalls, gpu);
             }
             else
             {
@@ -302,10 +309,14 @@ internal static class FrameLog
         _nodesAddedWindow = 0;
     }
 
-    private static void LogHitch(ulong nowUsec, DateTime fromUtc, DateTime toUtc, float ms, Counters d, int drawCalls)
+    private static void LogHitch(ulong nowUsec, DateTime fromUtc, DateTime toUtc, float ms, Counters d, int drawCalls, float gpu)
     {
         var causes = HitchCauses(d);
-        var suffix = drawCalls > 0 ? $" | {drawCalls} draw calls" : "";
+        // Where the frame's time went: the game's logic, the CPU side of
+        // drawing, the rest (input, physics, waiting); the GPU's own time.
+        var other = Math.Max(0, ms - _frameLogicMs - _frameDrawMs);
+        var suffix = $" | logic {_frameLogicMs:0} draw {_frameDrawMs:0} other {other:0} gpu {gpu:0} ms"
+            + (drawCalls > 0 ? $" | {drawCalls} draw calls" : "");
         if (d.JitMethods > 0 && JitEvents.Running)
             Pending.Add((nowUsec + JitNamesDelayUsec, fromUtc, toUtc, ms, d, causes, suffix));
         else
@@ -346,6 +357,8 @@ internal static class FrameLog
             causes.Add(scripts);
         if (AssetKeep.FrameSummary() is { } loads)
             causes.Add(loads);
+        if (SceneTiming.FrameSummary() is { } instancing)
+            causes.Add(instancing);
         if (d.GcMinor > 0 || d.GcMajor > 0)
             causes.Add($"gc minor +{d.GcMinor} major +{d.GcMajor}");
         if (d.Pipelines > 0)
@@ -397,6 +410,7 @@ internal static class FrameLog
                 + $" | cpu: logic p50 {Pct(LogicMs, 0.5):0.0} p95 {Pct(LogicMs, 0.95):0.0}, draw p50 {Pct(DrawMs, 0.5):0.0} p95 {Pct(DrawMs, 0.95):0.0}"
                 + (GpuMs.Any(g => g > 0) ? $" | gpu p50 {Pct(GpuMs, 0.5):0.0} p95 {Pct(GpuMs, 0.95):0.0}" : " | gpu n/a")
                 + AssetKeep.TakeWindowSummary()
+                + SceneTiming.TakeWindowSummary(FrameMs.Count)
                 + CpuProbe.TakeSummary(FrameMs.Count)
                 + (LiveScenes.Count > 0
                     ? " | live scenes: "
