@@ -1,5 +1,5 @@
 <!-- launcher-dialog -->
-StS2 Launcher Perf {{VERSION}} (based on upstream {{UPSTREAM_TAG}}): English launcher, and a Perf settings panel next to the Debug button (FPS cap, vsync, particles, resolution, effects, frame-time log with the CPU/GPU split and what caused each stutter, a Lean visuals one-tap preset: faster card rendering, card trails off, idle transition layer skip, background sway off; a one-shot scene probe that measures what the fight screen costs the GPU, experimental JIT warm-up).
+StS2 Launcher Perf {{VERSION}} (based on upstream {{UPSTREAM_TAG}}): English launcher, and a Perf settings panel next to the Debug button (FPS cap, vsync, particles, resolution, effects, frame-time log with the CPU/GPU split and what caused each stutter, a Lean visuals one-tap preset: faster card rendering, card trails off, idle transition layer skip, background sway off; a one-shot scene probe that measures what the fight screen costs the GPU, a CPU breakdown of the game's scripts, experimental JIT warm-up).
 <!-- /launcher-dialog -->
 
 **StS2 Launcher Perf {{VERSION}}**: the [StS2 Launcher Mod Manager](https://github.com/{{UPSTREAM_REPO}}) {{UPSTREAM_TAG}} release with a performance add-on, for lower-end Android devices.

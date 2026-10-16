@@ -44,6 +44,7 @@ and resolution stay as you set them.
 | Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
+| CPU breakdown (frame log) | Off, On | Times every per-frame callback of the game's scripts and adds the biggest to the frame log's stats line. See below. |
 | Scene probe (once) | Off, Next fight, Slow moments | Measures what each part of the fight screen costs the GPU, once, then turns itself off. Slow moments tests what's behind the next five slowdowns instead. See below. |
 
 "Game setting" / 100% / Full / "As the game sets" leave the game exactly as
@@ -86,6 +87,7 @@ can switch settings mid-fight with no restart and no rebuild:
 | `card_trails` | `on`, `off` | `on` |
 | `idle_overlay` | `draw`, `skip` | `draw` |
 | `bg_sway` | `on`, `off` | `on` |
+| `cpu_probe` | `off`, `on` | `off` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
 
@@ -194,6 +196,28 @@ stutters the first time something happens in a session, which is the JIT
 What the probe measured with Lean visuals on, of ~13 ms: the five
 background layers ~1.2 ms each, the health bars' clip masks 2.5 ms, the top
 bar 2.6 ms, the cards in hand 2.6 ms.
+
+### Big shiv turns: the CPU
+
+With the GPU fixes above and Low res, a Pad 5 runs most of a run at 55–59
+fps. The exception was a long Silent turn (Expertise, shivs thrown one after
+another, ~350 cards created and exhausted in four minutes): 19–30 fps with
+the GPU at 18–23 ms but the game's own logic at 25–39 ms per frame. That
+part is the CPU: the game's scripts updating every card, effect and creature
+each frame, on Mono's JIT.
+
+**CPU breakdown → On** (with the frame log on) times every per-frame
+callback of the game's scripts (`_Process`, `_PhysicsProcess`, `_Draw`,
+including what each calls) and adds the biggest to the stats line:
+
+```
+| scripts 21.3 ms/frame: NHandCardHolder._Process 6.10 ms x12, NCard._Process 4.02 ms x14, ...
+```
+
+`x12` is calls per frame, so roughly how many of that node are alive. Logic
+time these don't cover is the engine's own work (tweens, animations,
+layout) and signal handlers. Patching takes a moment when the game first
+comes up with it on; turning it off removes it.
 
 ### Scene probe: what the GPU spends its time on
 

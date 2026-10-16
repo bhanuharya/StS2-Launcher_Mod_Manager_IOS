@@ -383,6 +383,7 @@ internal static class FrameLog
                 + (_drawCallsMax > 0 ? $" | draw calls avg {_drawCallsSum / FrameMs.Count} max {_drawCallsMax}" : "")
                 + $" | cpu: logic p50 {Pct(LogicMs, 0.5):0.0} p95 {Pct(LogicMs, 0.95):0.0}, draw p50 {Pct(DrawMs, 0.5):0.0} p95 {Pct(DrawMs, 0.95):0.0}"
                 + (GpuMs.Any(g => g > 0) ? $" | gpu p50 {Pct(GpuMs, 0.5):0.0} p95 {Pct(GpuMs, 0.95):0.0}" : " | gpu n/a")
+                + CpuProbe.TakeSummary(FrameMs.Count)
                 + (LiveScenes.Count > 0
                     ? " | live scenes: "
                         + string.Join(", ", LiveScenes.OrderByDescending(kv => kv.Value).Take(8).Select(kv => $"{kv.Key} x{kv.Value}"))

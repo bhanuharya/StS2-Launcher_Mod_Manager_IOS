@@ -1,0 +1,142 @@
+using System;
+using System.Collections.Generic;
+using System.Diagnostics;
+using System.Linq;
+using System.Reflection;
+using Godot;
+using HarmonyLib;
+
+namespace STS2Perf;
+
+// cpu_probe=on (Perf settings → CPU breakdown): which of the game's scripts
+// the CPU's per-frame time goes to.
+//
+// The 0.4.2.10 logs from a Pad 5 showed a big shiv turn is CPU-bound: the
+// game's logic took 25-39 ms per frame (frame log "logic") for minutes while
+// ~350 cards were created and exhausted, with the GPU at 18-23 ms. This times
+// every per-frame callback of the game's node scripts (_Process,
+// _PhysicsProcess, _Draw) with a Harmony prefix and postfix, per method,
+// including whatever each one calls, and the frame log's stats line gets the
+// biggest ones:
+//
+//   | scripts 21.3 ms/frame: NHandCardHolder._Process 6.10 ms x12, ...
+//
+// "x12" is calls per frame (instances). Logic time not covered by these is
+// the engine's own work (tweens, animations, layout) and signal handlers.
+// Patching takes a moment, once, when the game is up with this on; timing
+// costs about a microsecond per call. Turning it off removes the patches.
+internal static class CpuProbe
+{
+    private const string HarmonyId = "com.sts2perf.cpuprobe";
+    private const BindingFlags Declared = BindingFlags.Instance | BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.DeclaredOnly;
+    private static readonly string[] Callbacks = { "_Process", "_PhysicsProcess", "_Draw" };
+
+    private sealed class Stat
+    {
+        public long Ticks;
+        public int Calls;
+    }
+
+    private static Harmony _harmony;
+    private static bool _patched;
+    private static readonly Dictionary<MethodBase, Stat> Stats = new();
+
+    public static bool Active => _patched;
+
+    // From PerfRuntime.ApplyAll once the game's UI is up.
+    public static void Apply()
+    {
+        var on = PerfSettings.Value("cpu_probe") == "on";
+        if (on && !_patched)
+            Patch();
+        else if (!on && _patched)
+            Unpatch();
+    }
+
+    private static void Patch()
+    {
+        var game = AppDomain.CurrentDomain.GetAssemblies().FirstOrDefault(a => a.GetName().Name == "sts2");
+        if (game == null)
+            return;
+        _patched = true;
+        var clock = Stopwatch.StartNew();
+        _harmony ??= new Harmony(HarmonyId);
+        var prefix = new HarmonyMethod(typeof(CpuProbe), nameof(Prefix));
+        var postfix = new HarmonyMethod(typeof(CpuProbe), nameof(Postfix));
+        var count = 0;
+        var failed = 0;
+        foreach (var type in Types(game))
+        {
+            if (type.ContainsGenericParameters || !typeof(Node).IsAssignableFrom(type))
+                continue;
+            foreach (var method in type.GetMethods(Declared).Where(m => Callbacks.Contains(m.Name) && !m.IsAbstract))
+            {
+                try
+                {
+                    _harmony.Patch(method, prefix: prefix, postfix: postfix);
+                    count++;
+                }
+                catch (Exception ex)
+                {
+                    if (++failed <= 3)
+                        PerfEntry.Log($"cpu breakdown: can't time {type.Name}.{method.Name}: {ex.Message}");
+                }
+            }
+        }
+        PerfEntry.Log($"cpu breakdown: timing {count} per-frame callbacks of the game's scripts ({failed} failed), set up in {clock.Elapsed.TotalSeconds:0.0} s");
+    }
+
+    private static void Unpatch()
+    {
+        _harmony?.UnpatchAll(HarmonyId);
+        _patched = false;
+        lock (Stats)
+            Stats.Clear();
+        PerfEntry.Log("cpu breakdown: off");
+    }
+
+    private static IEnumerable<Type> Types(Assembly assembly)
+    {
+        try
+        {
+            return assembly.GetTypes();
+        }
+        catch (ReflectionTypeLoadException ex)
+        {
+            return ex.Types.Where(t => t != null);
+        }
+    }
+
+    private static void Prefix(out long __state) => __state = Stopwatch.GetTimestamp();
+
+    private static void Postfix(long __state, MethodBase __originalMethod)
+    {
+        var elapsed = Stopwatch.GetTimestamp() - __state;
+        lock (Stats)
+        {
+            if (!Stats.TryGetValue(__originalMethod, out var stat))
+                Stats[__originalMethod] = stat = new Stat();
+            stat.Ticks += elapsed;
+            stat.Calls++;
+        }
+    }
+
+    // For FrameLog's stats line: the window's biggest callbacks, per frame,
+    // then starts a new window.
+    public static string TakeSummary(int frames)
+    {
+        if (!_patched || frames == 0)
+            return "";
+        List<(MethodBase Method, long Ticks, int Calls)> rows;
+        lock (Stats)
+        {
+            rows = Stats.Select(kv => (kv.Key, kv.Value.Ticks, kv.Value.Calls)).ToList();
+            Stats.Clear();
+        }
+        double PerFrame(long ticks) => ticks * 1000.0 / Stopwatch.Frequency / frames;
+        var top = rows.OrderByDescending(r => r.Ticks)
+            .Take(8)
+            .Select(r => $"{r.Method.DeclaringType?.Name}.{r.Method.Name} {PerFrame(r.Ticks):0.00} ms x{(double)r.Calls / frames:0.#}");
+        return $" | scripts {PerFrame(rows.Sum(r => r.Ticks)):0.0} ms/frame: {string.Join(", ", top)}";
+    }
+}
