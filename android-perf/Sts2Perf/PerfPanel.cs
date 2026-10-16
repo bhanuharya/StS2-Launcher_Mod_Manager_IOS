@@ -40,6 +40,7 @@ internal static class PerfPanel
         new("card_trails", "Card trails", new Option[] { new("on", "On"), new("off", "Off") }),
         new("idle_overlay", "Idle transition layer", new Option[] { new("draw", "Draw (game)"), new("skip", "Skip") }),
         new("bg_sway", "Background sway", new Option[] { new("on", "On"), new("off", "Off (still)") }),
+        new("asset_cache", "Keep loaded assets", new Option[] { new("game", "As the game"), new("keep", "Keep (fewer hitches)") }),
         new("frame_log", "Frame-time log", new Option[]
         {
             new("0", "Off"), new("5", "Every 5 s"), new("10", "Every 10 s"), new("30", "Every 30 s"),

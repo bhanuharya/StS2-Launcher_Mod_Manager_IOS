@@ -37,6 +37,7 @@ internal static class SceneProbe
     private const int SettleFrames = 6;
     private const int MeasureFrames = 16;
     private const int MaxBisect = 16;
+    private const int MaxLayers = 14;
     private const double FightSettleSeconds = 5;
 
     private sealed class Item
@@ -415,12 +416,24 @@ internal static class SceneProbe
                 n => RenderingServer.CanvasItemSetMaterial(n.GetCanvasItem(), n.Material?.GetRid() ?? new Rid()));
         }
 
-        var layers = items.Where(i => i.FullScreen && i.Node is TextureRect && !string.IsNullOrEmpty(i.Node.SceneFilePath)).Select(i => (CanvasItem)i.Node).ToList();
+        // Background layers: full-screen pictures anywhere, plus the layers of
+        // the fight's background, of any node type and size.
+        var background = BackgroundItems(items);
+        var layers = items.Where(i => i.FullScreen && i.Node is TextureRect && !string.IsNullOrEmpty(i.Node.SceneFilePath))
+            .Concat(BackgroundLayers(items, background))
+            .Distinct()
+            .Select(i => (CanvasItem)i.Node)
+            .ToList();
         if (layers.Count > 0)
             yield return Batch("background layers hidden", layers,
                 n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), false),
                 n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), n.Visible));
-        foreach (var layer in layers)
+        var bgShaded = background.Where(i => i.Visible && i.Node is CanvasItem { Material: ShaderMaterial }).Select(i => (CanvasItem)i.Node).ToList();
+        if (bgShaded.Count > 0)
+            yield return Batch("background shaders removed", bgShaded,
+                n => RenderingServer.CanvasItemSetMaterial(n.GetCanvasItem(), new Rid()),
+                n => RenderingServer.CanvasItemSetMaterial(n.GetCanvasItem(), n.Material?.GetRid() ?? new Rid()));
+        foreach (var layer in layers.Take(MaxLayers))
             yield return Hide("layer", layer, Label(layer), 1);
 
         var transitions = visible.Where(n => n.GetType().Name == "NTransition").ToList();
@@ -428,6 +441,40 @@ internal static class SceneProbe
             yield return Batch("transition overlay hidden", transitions,
                 n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), false),
                 n => RenderingServer.CanvasItemSetVisible(n.GetCanvasItem(), n.Visible));
+    }
+
+    // Everything under the fight's background container (BgContainer, in the
+    // combat room), not the container itself. Walk lists parents first.
+    private static HashSet<Item> BackgroundItems(List<Item> items)
+    {
+        var under = new HashSet<Item>();
+        for (var i = 1; i < items.Count; i++)
+        {
+            var parent = items[items[i].Parent];
+            if (under.Contains(parent) || parent.Node.Name.ToString() == "BgContainer")
+                under.Add(items[i]);
+        }
+        return under;
+    }
+
+    // The background's layers: visible instanced scenes in it, except ones
+    // holding two or more others (a whole background, a group of layers),
+    // which would only repeat what their layers show.
+    private static IEnumerable<Item> BackgroundLayers(List<Item> items, HashSet<Item> background)
+    {
+        var scenesInside = new Dictionary<Item, int>();
+        for (var i = items.Count - 1; i > 0; i--)
+        {
+            var item = items[i];
+            if (!background.Contains(item))
+                continue;
+            var parent = items[item.Parent];
+            var inside = scenesInside.TryGetValue(item, out var n) ? n : 0;
+            var add = inside + (string.IsNullOrEmpty(item.Node.SceneFilePath) ? 0 : 1);
+            scenesInside[parent] = (scenesInside.TryGetValue(parent, out var p) ? p : 0) + add;
+        }
+        return background.Where(i => i.Visible && i.Node is CanvasItem && !string.IsNullOrEmpty(i.Node.SceneFilePath)
+            && (scenesInside.TryGetValue(i, out var n) ? n : 0) < 2);
     }
 
     // ---- measuring -------------------------------------------------------
@@ -544,6 +591,71 @@ internal static class SceneProbe
             return 0;
         var sorted = values.OrderBy(v => v).ToList();
         return sorted[sorted.Count / 2];
+    }
+
+    // ---- fight backgrounds (frame log) -----------------------------------
+
+    private static Node _fightRoom;
+    private static ulong _fightRoomUsec;
+    private const ulong BackgroundSettleUsec = 1_500_000;
+
+    // From FrameLog when a combat room enters the tree.
+    public static void NoteFight(Node room)
+    {
+        _fightRoom = room;
+        _fightRoomUsec = Time.GetTicksUsec();
+    }
+
+    // From PerfRuntime's tick, once per fight, a moment after the room
+    // appeared: what its background is made of. The 0.4.2.10 logs had fights
+    // in one act (Underdocks) at twice the GPU time of the others.
+    public static void LogBackground()
+    {
+        var room = _fightRoom;
+        if (room == null || Time.GetTicksUsec() - _fightRoomUsec < BackgroundSettleUsec)
+            return;
+        _fightRoom = null;
+        if (!GodotObject.IsInstanceValid(room) || room.FindChild("BgContainer", true, false) is not CanvasItem bg)
+            return;
+        var items = Walk(bg);
+        var screen = ((SceneTree)Engine.GetMainLoop()).Root.GetVisibleRect();
+        var screenArea = Math.Max(1f, screen.Size.X * screen.Size.Y);
+        var layers = new List<string>();
+        var shaders = new Dictionary<string, (int Count, bool ScreenRead)>();
+        var counts = new Dictionary<string, int>();
+        void Count(string what) => counts[what] = counts.TryGetValue(what, out var n) ? n + 1 : 1;
+        foreach (var item in items)
+        {
+            if (item.Node is not CanvasItem ci || !item.Visible)
+                continue;
+            if (item.Node.GetClass() == "SpineSprite")
+                Count("Spine skeletons");
+            if (ci is GpuParticles2D or CpuParticles2D)
+                Count("particle emitters");
+            if (ci is CanvasGroup)
+                Count("CanvasGroups");
+            if (ci is BackBufferCopy)
+                Count("BackBufferCopy");
+            if (ci.ClipChildren != CanvasItem.ClipChildrenMode.Disabled)
+                Count("clip masks");
+            if (ci.Material is ShaderMaterial { Shader: { } shader })
+            {
+                var name = ShaderPath(shader, ci);
+                name = name[(name.LastIndexOf('/') + 1)..];
+                shaders[name] = (shaders.TryGetValue(name, out var s) ? s.Count + 1 : 1, ReadsScreen(shader));
+            }
+            if (item.Parent >= 0 && !string.IsNullOrEmpty(ci.SceneFilePath) && layers.Count < 30)
+            {
+                var area = CoveredArea(ci, screen);
+                layers.Add($"{Label(ci)} {(area > 0 ? $"{area * 100 / screenArea:0}%" : "")}{(ci.Material != null ? " +material" : "")}".TrimEnd());
+            }
+        }
+        PerfEntry.Log(
+            $"fight background: {items.Count} nodes, {layers.Count} scenes"
+                + (shaders.Count > 0 ? $" | shaders: {string.Join(", ", shaders.OrderByDescending(kv => kv.Value.Count).Select(kv => $"{kv.Key} x{kv.Value.Count}{(kv.Value.ScreenRead ? " (reads the screen)" : "")}"))}" : "")
+                + (counts.Count > 0 ? $" | {string.Join(", ", counts.Select(kv => $"{kv.Key} {kv.Value}"))}" : "")
+                + $" | {string.Join("; ", layers)}"
+        );
     }
 
     // ---- spikes ----------------------------------------------------------

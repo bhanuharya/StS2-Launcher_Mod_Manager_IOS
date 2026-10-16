@@ -170,12 +170,14 @@ internal static class PerfRuntime
         Run("particles", () => ApplyParticles(tree));
         Run("cards", () => CardFx.Apply(tree));
         Run("idle overlay", () => OverlayFx.Apply(tree));
+        Run("asset cache", AssetKeep.Apply);
         Run("properties", () => ApplyProperties(root));
         if (_gameUiSeen)
         {
             Run("jit warm-up", JitWarmup.MaybeStart);
             Run("scene probe", SceneProbe.Tick);
             Run("cpu breakdown", CpuProbe.Apply);
+            Run("fight background", SceneProbe.LogBackground);
         }
     }
 

@@ -41,7 +41,12 @@ namespace STS2Perf;
 // the first time it runs; a first-time card or effect can stall a frame on
 // that alone (see JitWarmup). gc: Mono's collections, minor (nursery) and
 // major; Mono keeps no pause time. nodes: nodes added, named by the scene
-// files instanced, so a burst of effects shows what it was.
+// files instanced, so a burst of effects shows what it was. loads: assets
+// read from the game's package during the frame (AssetKeep). scripts: with
+// the CPU breakdown on, the frame's slowest game scripts (CpuProbe).
+//
+// It also notes, once per fight, what the fight's background is made of
+// (SceneProbe.LogBackground): some acts cost the GPU twice what others do.
 internal static class FrameLog
 {
     private const float HitchMs = 50f;
@@ -126,6 +131,8 @@ internal static class FrameLog
         _nodesAddedFrame++;
         try
         {
+            if (node.GetType().Name == "NCombatRoom")
+                SceneProbe.NoteFight(node);
             var name = SceneName(node);
             if (name == null)
                 return;
@@ -218,6 +225,8 @@ internal static class FrameLog
         }
         _nodesAddedFrame = 0;
         ScenesFrame.Clear();
+        AssetKeep.ResetFrame();
+        CpuProbe.ResetFrame();
     }
 
     private static void Sample()
@@ -325,7 +334,7 @@ internal static class FrameLog
                 $"jit +{d.JitMethods} methods{(d.JitMs >= 1 ? $" {d.JitMs:0} ms" : "")}"
                     + (string.IsNullOrEmpty(jitTypes) ? "" : $" ({jitTypes})")
             );
-        var text = causes.Count > 0 ? string.Join("; ", causes) : "no jit, gc, shader, texture or node change (game code or GPU)";
+        var text = causes.Count > 0 ? string.Join("; ", causes) : "no jit, gc, load, shader, texture or node change (game code or GPU)";
         PerfEntry.Log($"hitch {ms:0} ms: {text}{suffix}");
     }
 
@@ -333,6 +342,10 @@ internal static class FrameLog
     private static List<string> HitchCauses(Counters d)
     {
         var causes = new List<string>();
+        if (CpuProbe.FrameSummary() is { } scripts)
+            causes.Add(scripts);
+        if (AssetKeep.FrameSummary() is { } loads)
+            causes.Add(loads);
         if (d.GcMinor > 0 || d.GcMajor > 0)
             causes.Add($"gc minor +{d.GcMinor} major +{d.GcMajor}");
         if (d.Pipelines > 0)
@@ -383,6 +396,7 @@ internal static class FrameLog
                 + (_drawCallsMax > 0 ? $" | draw calls avg {_drawCallsSum / FrameMs.Count} max {_drawCallsMax}" : "")
                 + $" | cpu: logic p50 {Pct(LogicMs, 0.5):0.0} p95 {Pct(LogicMs, 0.95):0.0}, draw p50 {Pct(DrawMs, 0.5):0.0} p95 {Pct(DrawMs, 0.95):0.0}"
                 + (GpuMs.Any(g => g > 0) ? $" | gpu p50 {Pct(GpuMs, 0.5):0.0} p95 {Pct(GpuMs, 0.95):0.0}" : " | gpu n/a")
+                + AssetKeep.TakeWindowSummary()
                 + CpuProbe.TakeSummary(FrameMs.Count)
                 + (LiveScenes.Count > 0
                     ? " | live scenes: "
