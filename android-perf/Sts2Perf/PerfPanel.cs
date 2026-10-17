@@ -43,6 +43,7 @@ internal static class PerfPanel
         new("asset_cache", "Keep loaded assets", new Option[] { new("game", "As the game"), new("keep", "Keep (fewer hitches)") }),
         new("combat_ui", "Combat UI refresh", new Option[] { new("game", "Every frame (game)"), new("limited", "10 per second") }),
         new("text_fx", "Text colors", new Option[] { new("game", "Game's effects"), new("native", "Built-in (same look)") }),
+        new("collision_map", "Particle collisions", new Option[] { new("game", "Game's map"), new("light", "Light map (faster)") }),
         new("spine_rate", "Creature animation", new Option[] { new("game", "Every frame (game)"), new("half", "Every 2nd frame"), new("third", "Every 3rd frame") }),
         new("frame_log", "Frame-time log", new Option[]
         {
@@ -60,7 +61,7 @@ internal static class PerfPanel
     private static readonly (string Key, string Value)[] Lean =
     {
         ("card_fx", "fast"), ("card_trails", "off"), ("idle_overlay", "skip"), ("bg_sway", "off"), ("effects", "off"),
-        ("asset_cache", "keep"), ("combat_ui", "limited"), ("text_fx", "native"),
+        ("asset_cache", "keep"), ("combat_ui", "limited"), ("text_fx", "native"), ("collision_map", "light"),
     };
 
     private static readonly List<(Row Row, StyledButton Button)> Buttons = new();
@@ -148,6 +149,7 @@ internal static class PerfPanel
                     if (GodotObject.IsInstanceValid(button))
                         button.Text = CurrentLabel(row);
                 PerfEntry.Log("Recommended: " + string.Join(", ", Lean.Select(l => $"{l.Key}={l.Value}")));
+                lean.Text = "Recommended: applied";
             };
             vbox.AddChild(lean);
 

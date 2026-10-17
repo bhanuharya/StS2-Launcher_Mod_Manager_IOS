@@ -30,8 +30,8 @@ when the game starts, or within 2 seconds while it runs.
 time and shows little (the "lean visuals": Card rendering Fast, Card trails
 Off, Idle transition layer Skip, Background sway Off, HDR / FXAA / debanding
 Off) and the fixes to the game's own code that change nothing on screen:
-Keep loaded assets, Combat UI refresh limited and Text colors built-in. Particles and resolution
-stay as you set them.
+Keep loaded assets, Combat UI refresh limited, Text colors built-in and
+Particle collisions light. Particles and resolution stay as you set them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -47,6 +47,7 @@ stay as you set them.
 | Keep loaded assets | As the game, Keep | The game unloads the assets it had to load on the spot (the card tooltip, power icons, attack effects) at every room change, then loads them again: a 50–70 ms stutter each time. Keep stops that unloading. See below. |
 | Combat UI refresh | Every frame (game), 10 per second | The game rebuilds its whole combat UI (every card's text in hand, intents, …) on every frame something changes, which during an enemy's move is most frames. 10 per second caps that, and updates the hand's cards a few per frame instead of all in one. See below. |
 | Text colors | Game's effects, Built-in (same look) | The game colors words and numbers with C# text effects that Godot runs for every character on every frame. Built-in draws the same colors with Godot's own `[color]`. See below. |
+| Particle collisions | Game's map, Light map (faster) | Slime splashes and the Foul Potion (probably treasure-room coins too) have particles that bounce off things, and while one is on screen the engine rebuilds a screen-sized collision map every frame: ~10 fps for 1–6 s after every slime move on a Pad 5. Light skips collision for particles that have nothing to collide with (the same motion) and keeps the map small for anything else. See below. |
 | Creature animation | Every frame (game), Every 2nd frame, Every 3rd frame | Updates the enemies' and Silent's Spine animation less often, keeping its speed. With the frame log on, each skeleton's update is timed either way. See below. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
@@ -96,6 +97,11 @@ can switch settings mid-fight with no restart and no rebuild:
 | `bg_sway` | `on`, `off` | `on` |
 | `cpu_probe` | `off`, `on` | `off` |
 | `asset_cache` | `game`, `keep` | `game` |
+| `combat_ui` | `game`, `limited` | `game` |
+| `text_fx` | `game`, `native` | `game` |
+| `collision_map` | `game`, `light` | `game` |
+| `spine_rate` | `game`, `half`, `third` | `game` |
+| `export` | `off`, `at_menu` (runs once, then back to `off`) | `off` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
 | `engine.<property>` | any property of `Engine`, e.g. `engine.physics_ticks_per_second=30`, `engine.max_physics_steps_per_frame=4` | — |
 
@@ -374,6 +380,50 @@ Animated effects (`[sine]`, `[jitter]`, fades) stay effects. To check it,
 **CPU breakdown** now also times `_ProcessCustomFX` and the game's
 `_Notification` overrides, with calls per frame (`RichTextGold.
 _ProcessCustomFX 3.2 ms x1500`).
+
+Measured with 0.4.2.16 (Overgrowth, full resolution): the color effects are
+gone from the breakdown. What's left is the animated `[sine]` text
+(`RichTextSine._ProcessCustomFX`, ~30 calls, 0.5–1 ms per frame), and logic
+in the Slimes fight at a median of ~6 ms per frame.
+
+### Slime splashes: particle collisions
+
+The same 0.4.2.16 session had a new pattern: stretches of 1–6 s where every
+frame took ~97 ms on the GPU (10 fps) with nothing new on the CPU side and
+the usual ~230 draw calls. Every one of them started within a second of a
+slime's move (Leaf Slime and Twig Slime, S and M, every move they have), and
+the 0.4.2.15 run had the same after the Foul Potion and in every treasure
+room (most likely its coins; the new log lines below will name the scene).
+Logs back to 0.4.2.6 show it too, with particles at 0%.
+
+Every slime move plays `vfx/vfx_slime_impact` on the player (the Foul Potion
+plays the same scene), and its goo bits are GPU particles that collide. 2D
+particles collide against the screen's signed distance field, and for every
+frame such an emitter is drawn, even with no particles out, Godot rebuilds
+that field from scratch: by default the screen plus 20% on every side
+(3584×2240 on a 2560×1600 screen), at half that resolution, with eleven
+jump-flood compute passes. Its buffers come to exactly 26.8 MB, the texture
+memory the frame log showed appearing on the first slime splash of every
+session. On a desktop, Godot 4.5.1 at 2560×1600 with one such emitter and no
+particles out: 28.6 ms → 286 ms per frame.
+
+The field is built from the scene's `LightOccluder2D` nodes. With none, it
+says "nothing anywhere" and no particle ever collides, so all of that work
+changes nothing on screen. **Particle collisions → Light**:
+
+- while no occluder is in the scene, every new emitter that collides gets a
+  copy of its particle material with collision off, so it moves the same and
+  there's no field to rebuild (the desktop test: 270 → 28.9 ms, the same as
+  with no emitter at all). If an occluder appears, they collide again. The
+  log says once per effect which ones skip collision.
+- the field itself, for anything that still needs it, is kept at a quarter of
+  the screen's resolution with no margin (`sdf_scale` 25%, `sdf_oversize`
+  100%), an eighth of the pixels per pass (desktop: 286 → 77 ms).
+
+With the frame log on, the stats line counts the frames in which an emitter
+that needs the field was drawn (`| collision map 64 frames, game size
+(vfx_slime_impact)`), hitch lines name them (`collision map
+(vfx_slime_impact x2)`), and emitters that skipped collision are counted.
 
 ### Acts: Underdocks costs the GPU twice as much
 
