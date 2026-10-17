@@ -30,8 +30,9 @@ when the game starts, or within 2 seconds while it runs.
 time and shows little (the "lean visuals": Card rendering Fast, Card trails
 Off, Idle transition layer Skip, Background sway Off, HDR / FXAA / debanding
 Off) and the fixes to the game's own code that change nothing on screen:
-Keep loaded assets, Combat UI refresh limited, Text colors built-in and
-Particle collisions light. Particles and resolution stay as you set them.
+Keep loaded assets, Combat UI refresh limited, Text colors built-in,
+Particle collisions light and the garbage collector concurrent (that one from
+the next time the app starts). Particles and resolution stay as you set them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -46,12 +47,13 @@ Particle collisions light. Particles and resolution stay as you set them.
 | Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
 | Keep loaded assets | As the game, Keep | The game unloads the assets it had to load on the spot (the card tooltip, power icons, attack effects) at every room change, then loads them again: a 50–70 ms stutter each time. Keep stops that unloading. See below. |
 | Combat UI refresh | Every frame (game), 10 per second | The game rebuilds its whole combat UI (every card's text in hand, intents, …) on every frame something changes, which during an enemy's move is most frames. 10 per second caps that, and updates the hand's cards a few per frame instead of all in one. See below. |
-| Text colors | Game's effects, Built-in (same look) | The game colors words and numbers with C# text effects that Godot runs for every character on every frame. Built-in draws the same colors with Godot's own `[color]`. See below. |
-| Particle collisions | Game's map, Light map (faster) | Slime splashes and the Foul Potion (probably treasure-room coins too) have particles that bounce off things, and while one is on screen the engine rebuilds a screen-sized collision map every frame: ~10 fps for 1–6 s after every slime move on a Pad 5. Light skips collision for particles that have nothing to collide with (the same motion) and keeps the map small for anything else. See below. |
+| Text colors | Game's effects, Built-in (same look) | The game colors words and numbers with C# text effects that Godot runs for every character on every frame. Built-in draws the same colors with Godot's own `[color]`, and runs the wavy `[sine]` text without the garbage it made per letter. See below. |
+| Particle collisions | Game's map, Light map (faster) | Slime splashes, the Foul Potion and treasure rooms have particles that bounce off things, and while one is on screen the engine rebuilds a screen-sized collision map every frame: ~10 fps for 1–6 s after every slime move on a Pad 5. Light skips collision when particles are off or there's nothing to collide with (the same motion), and keeps the map small otherwise. See below. |
+| Garbage collector (next start) | Mono's default, Concurrent (short pauses) | Concurrent runs Mono's major collections mostly on another core instead of stopping the game for ~300 ms each, as .NET's own Android apps do. Takes effect the next time the app starts. See below. |
 | Creature animation | Every frame (game), Every 2nd frame, Every 3rd frame | Updates the enemies' and Silent's Spine animation less often, keeping its speed. With the frame log on, each skeleton's update is timed either way. See below. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
-| CPU breakdown (frame log) | Off, On | Times every per-frame callback of the game's scripts and adds the biggest to the frame log's stats line. See below. |
+| CPU breakdown (frame log) | Off, On | Times every per-frame callback of the game's scripts, and the garbage each makes, and adds the biggest to the frame log's stats line. See below. |
 | Export game files (once) | Off, When the game starts | Writes the game's code and its scenes as text to `StS2LauncherMM/Export/` (a zip), to read what to tune. See below. |
 | Scene probe (once) | Off, Next fight, Slow moments | Measures what each part of the fight screen costs the GPU, once, then turns itself off. Slow moments tests what's behind the next five slowdowns instead. See below. |
 
@@ -100,6 +102,7 @@ can switch settings mid-fight with no restart and no rebuild:
 | `combat_ui` | `game`, `limited` | `game` |
 | `text_fx` | `game`, `native` | `game` |
 | `collision_map` | `game`, `light` | `game` |
+| `gc` | `game`, `background` (from the next start) | `game` |
 | `spine_rate` | `game`, `half`, `third` | `game` |
 | `export` | `off`, `at_menu` (runs once, then back to `off`) | `off` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
@@ -153,8 +156,12 @@ latency data), so this is the way to compare settings. What the parts mean:
   is compiled the first time it runs. A first Blade Dance or a first new enemy
   can stall a frame on that alone. The names in brackets are the classes that
   were compiled. **JIT warm-up** is the fix for these.
-- **gc**: Mono's garbage collections, minor (nursery) and major. Mono keeps no
-  pause times, and .NET's GC latency modes don't exist on Mono.
+- **gc**: Mono's garbage collections, minor (nursery) and major. The stats
+  line adds how fast the game makes garbage (`alloc 1.2 MB/s (main thread)`), which is
+  what fills the nursery, and with **CPU breakdown** on, which scripts made
+  it (`| garbage 21 KB/frame: …`). With the frame log on, Mono's own line for
+  each collection, with its real pause, is in the log too (from the next
+  start; see Garbage collection below).
 - **shaders compiled**, **texture memory**: Godot compiling a graphics
   pipeline or loading textures during the frame.
 - **loads**: assets the game read from its package during the frame, the
@@ -376,7 +383,8 @@ and tooltip, every frame.
 using the game's own color values (`StsColors`). Only color spans with no
 other color tag inside or around them: with the game's effects the outer
 color wins, with `[color]` the inner one, so nested ones stay as written.
-Animated effects (`[sine]`, `[jitter]`, fades) stay effects. To check it,
+Animated effects (`[jitter]`, fades) stay effects, and so does `[sine]`, with
+the change below. To check it,
 **CPU breakdown** now also times `_ProcessCustomFX` and the game's
 `_Notification` overrides, with calls per frame (`RichTextGold.
 _ProcessCustomFX 3.2 ms x1500`).
@@ -385,6 +393,17 @@ Measured with 0.4.2.16 (Overgrowth, full resolution): the color effects are
 gone from the breakdown. What's left is the animated `[sine]` text
 (`RichTextSine._ProcessCustomFX`, ~30 calls, 0.5–1 ms per frame), and logic
 in the Slimes fight at a median of ~6 ms per frame.
+
+Its time is small; its garbage isn't. Each call reads the tag's parameters
+through `CharFXTransform.Env`, and in Godot's C# that getter wraps them in a
+new `Godot.Collections.Dictionary` with a finalizer, registered with Godot's
+`DisposablesTracker` (a `WeakReference` and a dictionary entry): in the
+0.4.2.17 log ~42 calls a frame, ~2,500 such objects a second, for values
+that never change for a given tag. Built-in also runs `[sine]` as the game
+writes it (its constants read from the class) with each tag's parameters
+read once: Godot keeps one `CharFXTransform` per tag, and that's what
+they're cached on. On a desktop Mono test the patched method gives the same
+offsets, bit for bit.
 
 ### Slime splashes: particle collisions
 
@@ -424,6 +443,62 @@ With the frame log on, the stats line counts the frames in which an emitter
 that needs the field was drawn (`| collision map 64 frames, game size
 (vfx_slime_impact)`), hitch lines name them (`collision map
 (vfx_slime_impact x2)`), and emitters that skipped collision are counted.
+
+Measured with 0.4.2.17 (Overgrowth, full resolution, particles 0%): the
+Slimes fight ran at 49–54 fps with GPU frames of ~20 ms at the 95th
+percentile while the field was in use, instead of ~97 ms (10 fps). The skip
+itself didn't hold: the splash brings a `LightOccluder2D` of its own (a floor
+for the goo, it seems), and the log showed `2 emitters collide again` right
+after every splash, the treasure room's the same. So 0.4.2.18 also skips
+collision whenever particles are at 0%: nothing is emitted then, but the
+emitters are still drawn, and that's what asks for the field. With
+particles on, the splash keeps colliding against the light field.
+
+### Garbage collection
+
+The 0.4.2.17 session (24 minutes, mostly fights) had 971 frames over 50 ms,
+and a third of them had one of Mono's collections in them. The session had
+516 minor ones (one every ~3 s in a fight; the frames they land in mostly
+45–65 ms) and 49 major ones, whose frames averaged ~300 ms (most at room
+changes, where loading adds to it, some in fights), the biggest single cost.
+The rest: card creation when drawing (~25 ms for three cards), hover tips,
+the JIT, and ~160 frames of ~50 ms in game logic with no named cause, not
+next to a collection.
+
+Godot starts Mono, the game's .NET runtime, with no options, so it runs on
+Mono's defaults: a 4 MB nursery, and major collections that stop the game
+for all of their marking. **Garbage collector → Concurrent** sets
+`MONO_GC_PARAMS=major=marksweep-conc`: the major collector marks on another
+core while the game keeps running and stops it only briefly at the start and
+the end. That's what .NET's own Android apps use (`AndroidEnableSGenConcurrent`,
+on by default), and the Mono in this APK (9.0.7) has it built in.
+
+The nursery stays at 4 MB. A desktop test on Mono, with a ~270 MB heap built
+like Godot's (wrappers with finalizers registered in a tracker, old objects
+pointing at new ones), had a bigger nursery collect less often but each time
+for about that much longer: 4 MB 111 collections at ~21 ms, 16 MB 27 at
+~78 ms, 32 MB 14 at ~140 ms. Most of what a minor collection does there
+grows with the nursery. What the Pad 5's 50 ms is made of comes next:
+
+Mono reads these settings from the environment once, as it starts, before
+any add-on code runs. So the add-on writes them to `sts2perf_env` in the
+app's files dir, and a content provider added to the APK
+(`java/com/sts2perf/StartupEnv.java`, see How the build works) sets them on
+the next start: Android creates an app's providers before its first
+activity, so before Godot. That also means a change to this setting takes
+effect the next time the app starts. With the frame log on, the same file
+turns on Mono's own log of each collection, which lands next to the add-on's
+lines:
+
+```
+Mono: GC_MINOR: (Nursery full) time 41.20ms, stw 42.01ms promoted 1203K major size: 210432K in use: …
+Mono: GC_MAJOR_CONCURRENT_START: (Minor allowance)
+Mono: GC_MAJOR_CONCURRENT_FINISH: (finishing) time 13.11ms, stw 3.89ms …
+```
+
+`stw` is the time the game was stopped; `promoted` is what survived into the
+old generation. The add-on logs once per start what Mono started with:
+`garbage collector: background (this run started with MONO_GC_PARAMS=…)`.
 
 ### Acts: Underdocks costs the GPU twice as much
 
@@ -631,14 +706,22 @@ upstream release APK (perf.env pins the version and its SHA-256)
   ├─ tools/LauncherPatcher     STS2Mobile.dll: loads STS2Perf.dll at startup,
   │                            update check → this fork, MonoMod temp dir → new package,
   │                            Korean text → English (translations.json)
+  ├─ java/                     classes2.dex: StartupEnv, a content provider that sets
+  │                            the .NET runtime's GC and log options before Godot
+  │                            starts it (javac, then d8)
   ├─ tools/axml.py             AndroidManifest.xml: package id, provider authorities,
-  │                            app name, version
+  │                            app name, version, the StartupEnv provider
   └─ tools/repack.py           new APK; then zipalign + apksigner
 ```
 
 Only `AndroidManifest.xml`, `assets/dotnet_bcl/STS2Mobile.dll` and the new
-`assets/dotnet_bcl/STS2Perf.dll` differ from the upstream APK. The engine,
-Java code, FMOD and Spine libraries are upstream's binaries, byte for byte.
+`assets/dotnet_bcl/STS2Perf.dll` and `classes2.dex` differ from the upstream
+APK. The engine, upstream's Java code (`classes.dex`), FMOD and Spine
+libraries are upstream's binaries, byte for byte. The provider is a copy of
+the manifest's androidx.startup provider element with its own class name and
+authority, not exported; it only sets a few environment variables, from a
+file the add-on writes, and if anything about it fails the app starts as it
+would without it.
 
 The add-on hooks the launcher's own methods with Harmony, like the launcher
 hooks the game:
@@ -658,8 +741,9 @@ hooks the game:
 If the add-on fails to load, the launcher logs `[STS2Perf] ... failed to load`
 and runs exactly like upstream.
 
-Build locally (Linux/WSL, with the .NET 9 SDK, Python 3 and Android
-build-tools' `zipalign` and `apksigner` on `PATH` or in `$ANDROID_HOME`):
+Build locally (Linux/WSL, with the .NET 9 SDK, Python 3, a JDK, Android
+build-tools' `zipalign`, `apksigner` and `d8` on `PATH` or in `$ANDROID_HOME`,
+and an Android platform's `android.jar` under `$ANDROID_HOME/platforms`):
 
 ```bash
 KEYSTORE=sts2perf.p12 KEYSTORE_PASSWORD=... android-perf/build.sh out

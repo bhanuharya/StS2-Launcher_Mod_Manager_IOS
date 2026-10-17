@@ -21,7 +21,13 @@ namespace STS2Perf;
 //
 //   | scripts 21.3 ms/frame: NHandCardHolder._Process 6.10 ms x12, ...
 //
-// "x12" is calls per frame (instances). Logic time not covered by these is
+// "x12" is calls per frame (instances). The same methods' garbage (bytes the
+// .NET code allocated in them, which is what makes Mono collect; GcTuning)
+// follows, per frame:
+//
+//   | garbage 21 KB/frame: RichTextSine._ProcessCustomFX 4.1 KB, ...
+//
+// Logic time not covered by these is
 // the engine's own work (tweens, animations, layout) and signal handlers.
 // Hitch lines get the slow frame's own biggest ones:
 //
@@ -64,6 +70,7 @@ internal static class CpuProbe
     {
         public long Ticks;
         public int Calls;
+        public long Bytes;
     }
 
     private static Harmony _harmony;
@@ -161,17 +168,20 @@ internal static class CpuProbe
         }
     }
 
-    private static void Prefix(out long __state) => __state = Stopwatch.GetTimestamp();
+    private static void Prefix(out (long Ticks, long Bytes) __state) =>
+        __state = (Stopwatch.GetTimestamp(), GC.GetAllocatedBytesForCurrentThread());
 
-    private static void Postfix(long __state, MethodBase __originalMethod)
+    private static void Postfix((long Ticks, long Bytes) __state, MethodBase __originalMethod)
     {
-        var elapsed = Stopwatch.GetTimestamp() - __state;
+        var elapsed = Stopwatch.GetTimestamp() - __state.Ticks;
+        var bytes = GC.GetAllocatedBytesForCurrentThread() - __state.Bytes;
         lock (Stats)
         {
             if (!Stats.TryGetValue(__originalMethod, out var stat))
                 Stats[__originalMethod] = stat = new Stat();
             stat.Ticks += elapsed;
             stat.Calls++;
+            stat.Bytes += bytes;
             Frame[__originalMethod] = Frame.TryGetValue(__originalMethod, out var ticks) ? ticks + elapsed : elapsed;
         }
     }
@@ -207,16 +217,22 @@ internal static class CpuProbe
     {
         if (!_patched || frames == 0)
             return "";
-        List<(MethodBase Method, long Ticks, int Calls)> rows;
+        List<(MethodBase Method, long Ticks, int Calls, long Bytes)> rows;
         lock (Stats)
         {
-            rows = Stats.Select(kv => (kv.Key, kv.Value.Ticks, kv.Value.Calls)).ToList();
+            rows = Stats.Select(kv => (kv.Key, kv.Value.Ticks, kv.Value.Calls, kv.Value.Bytes)).ToList();
             Stats.Clear();
         }
         double PerFrame(long ticks) => Ms(ticks) / frames;
         var top = rows.OrderByDescending(r => r.Ticks)
             .Take(8)
             .Select(r => $"{r.Method.DeclaringType?.Name}.{r.Method.Name} {PerFrame(r.Ticks):0.00} ms x{(double)r.Calls / frames:0.#}");
-        return $" | scripts {PerFrame(rows.Where(r => !ExtraMethods.Contains(r.Method)).Sum(r => r.Ticks)):0.0} ms/frame: {string.Join(", ", top)}";
+        double Kb(long bytes) => bytes / 1024.0 / frames;
+        var garbage = rows.Where(r => r.Bytes > 0)
+            .OrderByDescending(r => r.Bytes)
+            .Take(6)
+            .Select(r => $"{r.Method.DeclaringType?.Name}.{r.Method.Name} {Kb(r.Bytes):0.0} KB");
+        return $" | scripts {PerFrame(rows.Where(r => !ExtraMethods.Contains(r.Method)).Sum(r => r.Ticks)):0.0} ms/frame: {string.Join(", ", top)}"
+            + $" | garbage {Kb(rows.Where(r => !ExtraMethods.Contains(r.Method)).Sum(r => r.Bytes)):0} KB/frame: {string.Join(", ", garbage)}";
     }
 }

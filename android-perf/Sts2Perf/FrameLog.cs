@@ -40,11 +40,13 @@ namespace STS2Perf;
 // jit: the game's .NET code runs on Mono's JIT here, so every method compiles
 // the first time it runs; a first-time card or effect can stall a frame on
 // that alone (see JitWarmup). gc: Mono's collections, minor (nursery) and
-// major; Mono keeps no pause time. nodes: nodes added, named by the scene
-// files instanced, so a burst of effects shows what it was. loads: assets
-// read from the game's package during the frame (AssetKeep). instancing:
-// the game's code creating scenes and adding them (SceneTiming). scripts:
-// with the CPU breakdown on, the frame's slowest game scripts (CpuProbe).
+// major, and how fast the game makes garbage (alloc, what fills the
+// nursery); Mono's own lines give each one's pause (GcTuning). nodes: nodes
+// added, named by the scene files instanced, so a burst of effects shows
+// what it was. loads: assets read from the game's package during the frame
+// (AssetKeep). instancing: the game's code creating scenes and adding them
+// (SceneTiming). scripts: with the CPU breakdown on, the frame's slowest
+// game scripts (CpuProbe).
 // Each hitch line ends with the frame's own logic / draw / other / gpu split.
 //
 // It also notes, once per fight, what the fight's background is made of
@@ -412,7 +414,7 @@ internal static class FrameLog
                 + $" | effects {PerfSettings.Value("effects")} (hdr2d {(root.UseHdr2D ? "on" : "off")})"
                 + $" | particles {PerfSettings.ParticlesPercent}%"
                 + $" | jit +{d.JitMethods} methods{(d.JitMs >= 1 ? $" {d.JitMs:0} ms" : "")}"
-                + $" | gc minor +{d.GcMinor} major +{d.GcMajor}"
+                + $" | gc minor +{d.GcMinor} major +{d.GcMajor}, alloc {d.AllocBytes / 1048576.0 / elapsed:0.00} MB/s (main thread)"
                 + $" | nodes {now.Nodes:0} (+{_nodesAddedWindow})"
                 + (_drawCallsMax > 0 ? $" | draw calls avg {_drawCallsSum / FrameMs.Count} max {_drawCallsMax}" : "")
                 + $" | cpu: logic p50 {Pct(LogicMs, 0.5):0.0} p95 {Pct(LogicMs, 0.95):0.0}, draw p50 {Pct(DrawMs, 0.5):0.0} p95 {Pct(DrawMs, 0.95):0.0}"
@@ -446,6 +448,7 @@ internal static class FrameLog
         double JitMs,
         int GcMinor,
         int GcMajor,
+        long AllocBytes,
         double Pipelines,
         double TextureBytes,
         double Nodes
@@ -457,6 +460,9 @@ internal static class FrameLog
                 JitInfo.GetCompilationTime().TotalMilliseconds,
                 GC.CollectionCount(0),
                 GC.CollectionCount(GC.MaxGeneration),
+                // The main thread's: exact, where the game's code runs, and
+                // GetTotalAllocatedBytes(false) only moves at collections on Mono.
+                GC.GetAllocatedBytesForCurrentThread(),
                 Performance.GetMonitor(Performance.Monitor.PipelineCompilationsCanvas)
                     + Performance.GetMonitor(Performance.Monitor.PipelineCompilationsMesh)
                     + Performance.GetMonitor(Performance.Monitor.PipelineCompilationsSurface)
@@ -471,6 +477,7 @@ internal static class FrameLog
                 JitMs - before.JitMs,
                 GcMinor - before.GcMinor,
                 GcMajor - before.GcMajor,
+                AllocBytes - before.AllocBytes,
                 Pipelines - before.Pipelines,
                 TextureBytes - before.TextureBytes,
                 Nodes - before.Nodes

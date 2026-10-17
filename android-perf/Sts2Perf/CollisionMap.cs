@@ -21,9 +21,15 @@ namespace STS2Perf;
 // The field is built from the LightOccluder2D nodes on screen. With none, it's
 // "nothing anywhere" and no particle ever collides. collision_map=light
 // (Perf settings → Particle collisions):
-// - while no occluder is in the scene, each new emitter that collides gets a
-//   copy of its ParticleProcessMaterial with collision off: the same motion,
-//   and no field to rebuild. If an occluder shows up, they get theirs back.
+// - while no occluder is in the scene, or particles are at 0% (nothing is
+//   emitted, but the emitters are still drawn, which is what asks for the
+//   field), each new emitter that collides gets a copy of its
+//   ParticleProcessMaterial with collision off: the same motion, and no
+//   field to rebuild. If an occluder shows up while particles are on, they
+//   get theirs back. The slime splash brings its own occluder (a floor for
+//   the goo, it seems): in a 0.4.2.17 log every splash's emitters were
+//   switched back as it appeared, so with particles on it gets the light
+//   field below, ~20 ms GPU frames instead of ~97 ms.
 // - the root viewport keeps the field, for whatever still needs it, at a
 //   quarter of the screen's resolution with no margin (Viewport.sdf_scale 25%,
 //   sdf_oversize 100%): an eighth of the pixels for every pass (the desktop
@@ -41,6 +47,7 @@ internal static class CollisionMap
 
     private static (Viewport.SdfOversizeEnum Oversize, Viewport.SdfScaleEnum Scale)? _stock;
     private static bool _light;
+    private static bool _particlesOff;
     private static bool _tracking;
     private static bool _frameHooked;
     private static readonly List<GpuParticles2D> Emitters = new();
@@ -78,9 +85,12 @@ internal static class CollisionMap
             (root.SdfOversize, root.SdfScale) = stock;
             PerfEntry.Log($"particle collisions: as the game does ({Describe(stock.Oversize, stock.Scale)})");
         }
-        if (_light && !light)
+        var particlesOff = PerfSettings.ParticlesPercent == 0;
+        if (_light && (!light || (_particlesOff && !particlesOff && AnyOccluder())))
             RestoreAll();
+        var skipAll = light && particlesOff && !(_light && _particlesOff);
         _light = light;
+        _particlesOff = particlesOff;
 
         var track = light || PerfSettings.FrameLogSeconds > 0;
         if (track && !_tracking)
@@ -91,6 +101,13 @@ internal static class CollisionMap
                 OnNodeAdded(node);
             foreach (var node in tree.Root.FindChildren("*", "GPUParticles2D", true, false))
                 OnNodeAdded(node);
+        }
+        else if (skipAll)
+        {
+            // Particles just went to 0%: the emitters already here, too.
+            foreach (var gpu in Emitters)
+                if (GodotObject.IsInstanceValid(gpu) && !gpu.HasMeta(OriginalMeta))
+                    Skip(gpu);
         }
         else if (!track && _tracking)
         {
@@ -144,12 +161,12 @@ internal static class CollisionMap
                         Emitters.RemoveAll(e => !GodotObject.IsInstanceValid(e) || !e.IsInsideTree());
                     if (!Emitters.Contains(gpu))
                         Emitters.Add(gpu);
-                    if (_light && !AnyOccluder())
+                    if (_light && (_particlesOff || !AnyOccluder()))
                         Skip(gpu);
                     break;
                 case LightOccluder2D occluder:
                     Occluders.Add(occluder);
-                    if (occluder.SdfCollision)
+                    if (occluder.SdfCollision && !_particlesOff)
                         RestoreAll();
                     break;
             }
@@ -200,7 +217,11 @@ internal static class CollisionMap
         _windowSkipped++;
         var scene = SceneName(gpu);
         if (SkipLogged.Add(scene))
-            PerfEntry.Log($"particle collisions: {scene} has nothing to collide with here, its particles skip collision");
+            PerfEntry.Log(
+                _particlesOff
+                    ? $"particle collisions: particles are off, so {scene}'s emitters skip collision"
+                    : $"particle collisions: {scene} has nothing to collide with here, its particles skip collision"
+            );
     }
 
     private static void RestoreAll()

@@ -10,9 +10,14 @@ with apktool:
   --label TEXT        replace every android:label that is a literal string
   --version-name S    android:versionName
   --version-code N    android:versionCode
+  --add-provider CLASS=AUTHORITY
+                      add a <provider> for CLASS, not exported, next to
+                      androidx.startup's (its element is the template)
 
 Strings are edited in place in the string pool (same index), so the XML tree
-and the resource map keep their offsets; only the pool is re-encoded.
+and the resource map keep their offsets; only the pool is re-encoded. An added
+provider's two strings go at the end of the pool; its attribute names and
+values otherwise are the template's own.
 
   axml.py edit IN OUT [options]
   axml.py dump IN                 print elements and attributes
@@ -24,6 +29,7 @@ import sys
 RES_XML_TYPE = 0x0003
 RES_STRING_POOL_TYPE = 0x0001
 RES_XML_START_ELEMENT_TYPE = 0x0102
+RES_XML_END_ELEMENT_TYPE = 0x0103
 UTF8_FLAG = 0x100
 
 TYPE_STRING = 0x03
@@ -127,9 +133,11 @@ class Manifest:
         self.pool = StringPool(bytes(self.buf[pos:pos + csize]))
         self.attrs = []
         self.elements = []
+        self.chunks = []
         pos = self.pool_end
         while pos < len(self.buf):
             typ, chsize, csize = struct.unpack_from("<HHI", self.buf, pos)
+            self.chunks.append((pos, typ, csize))
             if typ == RES_XML_START_ELEMENT_TYPE:
                 ext = pos + chsize
                 _ns, name, attr_start, attr_size, attr_count = struct.unpack_from("<IIHHH", self.buf, ext)
@@ -163,6 +171,38 @@ class Manifest:
         if attr.data_type not in (TYPE_INT_DEC, TYPE_INT_HEX):
             raise SystemExit(f"{self.s(attr.name)} is not an integer attribute")
         struct.pack_into("<I", self.buf, attr.pos + 16, value)
+
+    def add_element_like(self, element, template_name, values):
+        """Copies the <element> whose android:name is template_name (and its
+        end tag, not its children) to just before it, with the given
+        attributes' string values replaced."""
+        for i, (pos, typ, size) in enumerate(self.chunks):
+            if typ != RES_XML_START_ELEMENT_TYPE:
+                continue
+            attrs = [a for a in self.attrs if pos < a.pos < pos + size]
+            if not attrs or attrs[0].element != element or not any(
+                    self.s(a.name) == "name" and a.data_type == TYPE_STRING
+                    and self.s(a.data) == template_name for a in attrs):
+                continue
+            depth = 0
+            for end_pos, end_typ, end_size in self.chunks[i:]:
+                depth += {RES_XML_START_ELEMENT_TYPE: 1, RES_XML_END_ELEMENT_TYPE: -1}.get(end_typ, 0)
+                if depth == 0:
+                    break
+            start = bytearray(self.buf[pos:pos + size])
+            for name, value in values.items():
+                a = one([a for a in attrs if self.s(a.name) == name], f"<{element} {name}>")
+                if a.data_type != TYPE_STRING:
+                    raise SystemExit(f"<{element} {name}> is not a literal string")
+                self.pool.strings.append(value)
+                idx = len(self.pool.strings) - 1
+                struct.pack_into("<I", start, a.pos - pos + 8, idx)  # rawValue
+                struct.pack_into("<I", start, a.pos - pos + 16, idx)  # typed value
+            end = self.buf[end_pos:end_pos + end_size]
+            self.buf[pos:pos] = bytes(start) + bytes(end)
+            self.__init__(self.encode())  # offsets after the copy moved
+            return
+        raise SystemExit(f"no <{element}> named {template_name} to copy")
 
     def encode(self):
         pool = self.pool.encode()
@@ -232,6 +272,15 @@ def edit(m, args):
     if args.version_code is not None:
         m.set_int(one(m.find("manifest", "versionCode"), "versionCode"), args.version_code)
         print(f"versionCode: {args.version_code}")
+    for spec in args.add_provider:
+        cls, _, authority = spec.partition("=")
+        if not cls or not authority:
+            raise SystemExit(f"bad --add-provider {spec!r}")
+        if any(m.s(a.data) == authority for a in m.find("provider", "authorities")):
+            raise SystemExit(f"a provider already uses the authority {authority}")
+        m.add_element_like("provider", "androidx.startup.InitializationProvider",
+                           {"name": cls, "authorities": authority})
+        print(f"provider: {cls} ({authority})")
 
 
 def main():
@@ -244,6 +293,7 @@ def main():
     e.add_argument("--label")
     e.add_argument("--version-name")
     e.add_argument("--version-code", type=int)
+    e.add_argument("--add-provider", action="append", default=[], metavar="CLASS=AUTHORITY")
     d = sub.add_parser("dump")
     d.add_argument("input")
     args = ap.parse_args()

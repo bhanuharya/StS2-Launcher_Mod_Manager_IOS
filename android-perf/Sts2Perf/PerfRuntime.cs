@@ -92,6 +92,7 @@ internal static class PerfRuntime
         _started = true;
         PerfSettings.Reload();
         PerfEntry.Log($"settings: {PerfSettings.Summary()}");
+        GcTuning.Sync();
         FrameLog.Configure();
         JitEvents.Configure();
         ScheduleTick();
@@ -146,6 +147,7 @@ internal static class PerfRuntime
                 PerfEntry.Log($"settings changed: {PerfSettings.Summary()}");
                 FrameLog.Configure();
                 JitEvents.Configure();
+                GcTuning.Sync();
             }
             ApplyAll();
         }
@@ -183,6 +185,7 @@ internal static class PerfRuntime
             Run("combat ui", CombatUiRefresh.Apply);
             Run("creature animation", SpineDriver.Apply);
             Run("text colors", TextColors.Apply);
+            Run("wavy text", SineText.Apply);
             Run("async timing", AsyncTiming.Apply);
             Run("export", GameExport.MaybeStart);
         }
