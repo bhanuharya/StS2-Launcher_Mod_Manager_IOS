@@ -38,6 +38,9 @@ namespace STS2Perf;
 //                               every 2nd / 3rd frame (SpineDriver)
 //   text_fx=game|native         native: colored text with Godot's [color]
 //                               instead of the game's C# effects (TextColors)
+//   collision_map=game|light    light: the 2D distance field particles
+//                               collide against at 25% resolution, no margin
+//                               (CollisionMap)
 //   export=off|at_menu          at_menu: once the game is up, write the game's
 //                               code and scenes to StS2LauncherMM/Export
 //                               (GameExport), then back to off
@@ -104,6 +107,7 @@ internal static class PerfSettings
             "combat_ui" => Raw("combat_ui") ?? "game",
             "spine_rate" => Raw("spine_rate") ?? "game",
             "text_fx" => Raw("text_fx") ?? "game",
+            "collision_map" => Raw("collision_map") ?? "game",
             "export" => Raw("export") ?? "off",
             _ => Raw(key),
         };
@@ -185,6 +189,7 @@ internal static class PerfSettings
             $"combat ui {Value("combat_ui")}",
             $"creature animation {Value("spine_rate")}",
             $"text colors {Value("text_fx")}",
+            $"particle collisions {Value("collision_map")}",
             $"cpu breakdown {Value("cpu_probe")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",

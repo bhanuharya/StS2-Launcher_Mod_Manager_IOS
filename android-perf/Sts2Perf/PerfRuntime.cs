@@ -168,6 +168,7 @@ internal static class PerfRuntime
         Run("fps cap", ApplyMaxFps);
         Run("vsync", ApplyVsync);
         Run("particles", () => ApplyParticles(tree));
+        Run("particle collisions", () => CollisionMap.Apply(root));
         Run("cards", () => CardFx.Apply(tree));
         Run("idle overlay", () => OverlayFx.Apply(tree));
         Run("asset cache", AssetKeep.Apply);
