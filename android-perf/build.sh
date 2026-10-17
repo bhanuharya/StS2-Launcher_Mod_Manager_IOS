@@ -6,9 +6,11 @@
 #   2. STS2Mobile.dll patched to load it, to check this fork's releases for
 #      launcher updates, and with its Korean-only text in English
 #      (translations.json) (tools/LauncherPatcher).
-#   3. AndroidManifest.xml with its own package id, name and version, so it
-#      installs next to the upstream app (tools/axml.py).
-#   4. Repacked, zipaligned and signed with your key.
+#   3. classes2.dex: java/, a provider that sets the .NET runtime's GC and
+#      log options before it starts (see java/com/sts2perf/StartupEnv.java).
+#   4. AndroidManifest.xml with its own package id, name and version, so it
+#      installs next to the upstream app, and the provider (tools/axml.py).
+#   5. Repacked, zipaligned and signed with your key.
 #
 # Usage: build.sh <out_dir>
 # Env:   KEYSTORE           signing keystore (PKCS#12 or JKS)
@@ -55,6 +57,19 @@ tool() {
 }
 ZIPALIGN="$(tool zipalign)"
 APKSIGNER="$(tool apksigner)"
+# d8 turns the provider into dex (dex OUT_DIR CLASSES_DIR); Debian's
+# packaged dx works as well.
+if DEX="$(tool d8 2>/dev/null)"; then
+    dex() { "$DEX" --min-api 24 --release --lib "$ANDROID_JAR" --output "$1" $(find "$2" -name '*.class'); }
+elif DEX="$(command -v dalvik-exchange || command -v dx)"; then
+    dex() { "$DEX" --dex --min-sdk-version=24 --output="$1/classes.dex" "$2"; }
+else
+    fail "d8 not found (install Android build-tools)"
+fi
+# android.jar to compile against: the newest platform under $ANDROID_HOME.
+SDK="${ANDROID_HOME:-${ANDROID_SDK_ROOT:-}}"
+ANDROID_JAR="$(ls "$SDK"/platforms/android-*/android.jar 2>/dev/null | sort -V | tail -1)"
+[ -f "$ANDROID_JAR" ] || fail "android.jar not found (install an Android platform under \$ANDROID_HOME)"
 
 rm -rf "$WORK"
 mkdir -p "$WORK/base" "$WORK/patched"
@@ -95,16 +110,24 @@ dotnet "$WORK/patcher/LauncherPatcher.dll" "$REFS/STS2Mobile.dll" "$WORK/patched
     --addon STS2Perf.dll STS2Perf.PerfEntry \
     --addon-dir "/data/user/0/$PERF_PACKAGE/files/.godot/mono/publish/arm64"
 
+log "Building the startup provider"
+unzip -Z1 "$BASE_APK" | grep -qx classes2.dex && fail "$UPSTREAM_APK already has a classes2.dex"
+mkdir -p "$WORK/java" "$WORK/dex"
+javac --release 8 -nowarn -cp "$ANDROID_JAR" -d "$WORK/java" $(find "$HERE/java" -name '*.java')
+dex "$WORK/dex" "$WORK/java"
+
 log "Editing AndroidManifest.xml"
 python3 "$HERE/tools/axml.py" edit "$WORK/base/AndroidManifest.xml" "$WORK/patched/AndroidManifest.xml" \
     --package "$PERF_PACKAGE" --label "$PERF_LABEL" \
-    --version-name "$PERF_VERSION" --version-code "$VERSION_CODE"
+    --version-name "$PERF_VERSION" --version-code "$VERSION_CODE" \
+    --add-provider "com.sts2perf.StartupEnv=$PERF_PACKAGE.sts2perf-env"
 
 log "Repacking"
 python3 "$HERE/tools/repack.py" "$BASE_APK" "$WORK/unsigned.apk" \
     --put AndroidManifest.xml="$WORK/patched/AndroidManifest.xml" \
     --put assets/dotnet_bcl/STS2Mobile.dll="$WORK/patched/STS2Mobile.dll" \
-    --put assets/dotnet_bcl/STS2Perf.dll="$WORK/addon/STS2Perf.dll"
+    --put assets/dotnet_bcl/STS2Perf.dll="$WORK/addon/STS2Perf.dll" \
+    --put classes2.dex="$WORK/dex/classes.dex"
 "$ZIPALIGN" -f -p 4 "$WORK/unsigned.apk" "$WORK/aligned.apk"
 
 log "Signing"
@@ -119,6 +142,8 @@ rm -f "$OUT/$APK_NAME"
 # The manifest must read back as the new identity.
 python3 "$HERE/tools/axml.py" dump "$WORK/patched/AndroidManifest.xml" \
     | grep -q "^<manifest> package = '$PERF_PACKAGE'$" || fail "manifest check failed"
+python3 "$HERE/tools/axml.py" dump "$WORK/patched/AndroidManifest.xml" \
+    | grep -q "^<provider> name = 'com.sts2perf.StartupEnv'$" || fail "manifest check failed (provider)"
 
 cat > "$OUT/build.env" <<EOF
 PERF_VERSION=$PERF_VERSION
