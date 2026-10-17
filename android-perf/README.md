@@ -28,11 +28,10 @@ when the game starts, or within 2 seconds while it runs.
 
 **Recommended (one tap)** at the top turns on everything below that costs GPU
 time and shows little (the "lean visuals": Card rendering Fast, Card trails
-Off, Idle transition layer Skip, Background sway Off, HDR / FXAA / debanding
-Off) and the fixes to the game's own code that change nothing on screen:
-Keep loaded assets, Combat UI refresh limited, Text colors built-in,
-Particle collisions light and the garbage collector concurrent (that one from
-the next time the app starts). Particles and resolution stay as you set them.
+Off, Idle transition layer Skip, Background animation Off, HDR / FXAA /
+debanding Off) and the fixes to the game's own code that change nothing on
+screen: Keep loaded assets, Combat UI refresh limited, Text colors built-in
+and Particle collisions light. Particles and resolution stay as you set them.
 
 | Setting | Values | What it does |
 |---|---|---|
@@ -40,16 +39,15 @@ the next time the app starts). Particles and resolution stay as you set them.
 | HDR / FXAA / debanding | As the game sets, Off | Turns those full-screen effects off if the game uses them. The log says which were on. |
 | FPS cap | Game setting, 30, 40, 45, 60, 90, 120 | Overrides the game's FPS limit. Pick a divisor of the display's refresh rate (40 or 60 on 120 Hz) for even pacing. |
 | VSync | Game setting, On, Off, Adaptive, Mailbox | Overrides the game's vsync. |
-| Particles | 100%, 75%, 50%, 25%, Off | Scales how many particles every emitter spawns. |
+| Particles | 100%, 75%, 50%, 25%, Off | Scales how many particles every emitter spawns. Off also stops drawing the emitters, which Godot otherwise updates on the GPU every frame with nothing to emit. |
 | Card rendering | As the game, Fast | Fast draws each card straight to the screen instead of offscreen first. On a Pad 5 the cards in hand were half of a fight's GPU time. Loses the cards' ripple shader. |
 | Card trails | On, Off | Off hides the trail behind cards flying to a pile, where end-of-turn discards dropped to ~10 fps. |
 | Idle transition layer | Draw (game), Skip | Skip stops drawing the game's full-screen transition layer while it's idle and invisible (2.2 ms per frame at full resolution on a Pad 5). It's drawn again the moment any fade in it starts. In 0.4.2.8 it also hid the fade between rooms, so the previous room showed for a second while the next one loaded; fixed in 0.4.2.10. |
-| Background sway | On, Off (still) | Off detaches the wind-sway shader from the background foliage, so it stands still instead of being reshaded every frame. |
+| Background animation | On, Off (still) | Off stills the fight background: the foliage's wind sway, and Underdocks' water shimmer and ripples, which made those fights the slowest in the game (17–20 fps at full resolution on a Pad 5). The art stays; only its animation goes. See below. |
 | Keep loaded assets | As the game, Keep | The game unloads the assets it had to load on the spot (the card tooltip, power icons, attack effects) at every room change, then loads them again: a 50–70 ms stutter each time. Keep stops that unloading. See below. |
 | Combat UI refresh | Every frame (game), 10 per second | The game rebuilds its whole combat UI (every card's text in hand, intents, …) on every frame something changes, which during an enemy's move is most frames. 10 per second caps that, and updates the hand's cards a few per frame instead of all in one. See below. |
 | Text colors | Game's effects, Built-in (same look) | The game colors words and numbers with C# text effects that Godot runs for every character on every frame. Built-in draws the same colors with Godot's own `[color]`, and runs the wavy `[sine]` text without the garbage it made per letter. See below. |
 | Particle collisions | Game's map, Light map (faster) | Slime splashes, the Foul Potion and treasure rooms have particles that bounce off things, and while one is on screen the engine rebuilds a screen-sized collision map every frame: ~10 fps for 1–6 s after every slime move on a Pad 5. Light skips collision when particles are off or there's nothing to collide with (the same motion), and keeps the map small otherwise. See below. |
-| Garbage collector (next start) | Mono's default, Concurrent (short pauses) | Concurrent runs Mono's major collections mostly on another core instead of stopping the game for ~300 ms each, as .NET's own Android apps do. Takes effect the next time the app starts. See below. |
 | Creature animation | Every frame (game), Every 2nd frame, Every 3rd frame | Updates the enemies' and Silent's Spine animation less often, keeping its speed. With the frame log on, each skeleton's update is timed either way. See below. |
 | Frame-time log | Off, 5 s, 10 s, 30 s | Stats every N seconds, plus a line for every stutter saying what caused it. See below. |
 | JIT warm-up (experimental) | Off, At main menu | Compiles the game code your earlier sessions needed while you're at the main menu, so it isn't compiled mid-fight. See below. |
@@ -102,7 +100,6 @@ can switch settings mid-fight with no restart and no rebuild:
 | `combat_ui` | `game`, `limited` | `game` |
 | `text_fx` | `game`, `native` | `game` |
 | `collision_map` | `game`, `light` | `game` |
-| `gc` | `game`, `background` (from the next start) | `game` |
 | `spine_rate` | `game`, `half`, `third` | `game` |
 | `export` | `off`, `at_menu` (runs once, then back to `off`) | `off` |
 | `root.<property>` | any property of the game's root window, e.g. `root.msaa_2d=0`, `root.use_hdr_2d=false`, `root.canvas_item_default_texture_filter=1` | — |
@@ -179,6 +176,12 @@ latency data), so this is the way to compare settings. What the parts mean:
 
 A JIT hitch is logged a second or so late, once the compiled methods' names
 arrive. Up to 20 hitch lines per window; the stats line counts the rest.
+
+A frame over 3 s is usually the app in the background and starts a new
+window, but in case it wasn't, its line says what was counted in it and
+where the time went: `frame log: 7.1 s gap (app in the background, or a
+stall: … | logic … draw … other … ms)`. A 0.4.2.18 session at Low res in
+Underdocks had six of 4–8 s mid-fight, which the log couldn't explain yet.
 
 ### Finding what's slow with a lot of cards
 
@@ -457,48 +460,41 @@ particles on, the splash keeps colliding against the light field.
 ### Garbage collection
 
 The 0.4.2.17 session (24 minutes, mostly fights) had 971 frames over 50 ms,
-and a third of them had one of Mono's collections in them. The session had
-516 minor ones (one every ~3 s in a fight; the frames they land in mostly
-45–65 ms) and 49 major ones, whose frames averaged ~300 ms (most at room
-changes, where loading adds to it, some in fights), the biggest single cost.
-The rest: card creation when drawing (~25 ms for three cards), hover tips,
-the JIT, and ~160 frames of ~50 ms in game logic with no named cause, not
-next to a collection.
-
-Godot starts Mono, the game's .NET runtime, with no options, so it runs on
-Mono's defaults: a 4 MB nursery, and major collections that stop the game
-for all of their marking. **Garbage collector → Concurrent** sets
-`MONO_GC_PARAMS=major=marksweep-conc`: the major collector marks on another
-core while the game keeps running and stops it only briefly at the start and
-the end. That's what .NET's own Android apps use (`AndroidEnableSGenConcurrent`,
-on by default), and the Mono in this APK (9.0.7) has it built in.
-
-The nursery stays at 4 MB. A desktop test on Mono, with a ~270 MB heap built
-like Godot's (wrappers with finalizers registered in a tracker, old objects
-pointing at new ones), had a bigger nursery collect less often but each time
-for about that much longer: 4 MB 111 collections at ~21 ms, 16 MB 27 at
-~78 ms, 32 MB 14 at ~140 ms. Most of what a minor collection does there
-grows with the nursery. What the Pad 5's 50 ms is made of comes next:
-
-Mono reads these settings from the environment once, as it starts, before
-any add-on code runs. So the add-on writes them to `sts2perf_env` in the
-app's files dir, and a content provider added to the APK
-(`java/com/sts2perf/StartupEnv.java`, see How the build works) sets them on
-the next start: Android creates an app's providers before its first
-activity, so before Godot. That also means a change to this setting takes
-effect the next time the app starts. With the frame log on, the same file
-turns on Mono's own log of each collection, which lands next to the add-on's
-lines:
+and a third of them had one of Mono's collections in them: 516 minor ones
+(one every ~3 s in a fight) and 49 major ones. Mono keeps no pause times
+that the add-on can read, so 0.4.2.18 turned on Mono's own log of each
+collection (with the frame log on, from the next start), and its first log
+says the collections themselves aren't what makes those frames long:
 
 ```
-Mono: GC_MINOR: (Nursery full) time 41.20ms, stw 42.01ms promoted 1203K major size: 210432K in use: …
-Mono: GC_MAJOR_CONCURRENT_START: (Minor allowance)
-Mono: GC_MAJOR_CONCURRENT_FINISH: (finishing) time 13.11ms, stw 3.89ms …
+Mono: GC_MINOR: (Nursery full) time 6.86ms, stw 8.11ms promoted 603K major size: 67744K …
+Mono: GC_MAJOR_CONCURRENT_START: (LOS overflow)
+Mono: GC_MAJOR_CONCURRENT_FINISH: (finishing) time 387.64ms, stw 30.19ms …
+Mono: GC_MAJOR: (user request) time 104.51ms, stw 110.07ms …
 ```
 
-`stw` is the time the game was stopped; `promoted` is what survived into the
-old generation. The add-on logs once per start what Mono started with:
-`garbage collector: background (this run started with MONO_GC_PARAMS=…)`.
+- Minor collections stop the game (`stw`) for 6–10 ms, sometimes 17–50,
+  with ~300–700 KB of the 4 MB nursery surviving each.
+- The old generation is ~60–70 MB, and Mono here already collects it
+  concurrently: marking runs next to the game, which stops for ~25–40 ms.
+- The long ones, 100–150 ms, are `user request`: the game's own
+  `GC.Collect()` after each room's assets load (`PreloadManager`), during
+  the room transition.
+
+0.4.2.18 had a **Garbage collector** setting for
+`MONO_GC_PARAMS=major=marksweep-conc`, the concurrent collector, which is
+what Mono already does here. It's gone in 0.4.2.19. A bigger nursery was
+also tried in a desktop test of Mono, with a heap built like Godot's: fewer
+collections, each about that much longer, so the nursery stays at 4 MB.
+
+How the log is turned on: Mono reads its settings from the environment once,
+as it starts, before any add-on code runs. So the add-on writes them to
+`sts2perf_env` in the app's files dir, and a content provider added to the
+APK (`java/com/sts2perf/StartupEnv.java`, see How the build works) sets them
+on the next start: Android creates an app's providers before its first
+activity, so before Godot. If a start with them never reaches the add-on,
+the next one goes without them. The add-on logs once per start what Mono
+started with: `garbage collector: this run started with MONO_LOG_LEVEL=…`.
 
 ### Acts: Underdocks costs the GPU twice as much
 
@@ -524,8 +520,30 @@ ran the GPU at 38–49 ms per frame, 18–24 fps. Their background has 18–20
 items drawn with an additive fire shader (`vfx_stepped_shader_fire_add`),
 22–25 particle emitters, 7–8 clip masks (each one drawn offscreen first,
 like the cards were) and 5–6 full-screen layers; the other acts' backgrounds
-have no clip masks and a few emitters. Until that's measured part by part,
-Low res is the setting for Underdocks.
+have no clip masks and a few emitters.
+
+A 0.4.2.18 session at full resolution had it at its worst: Overgrowth
+fights at 49–58 fps, then Underdocks at 17–20 fps, the GPU at 50–58 ms per
+frame for 15 minutes. Its slow-GPU snapshots name the parts: the fire-shader
+items are the water's shimmer, Sprite2Ds named `water_reflection*`, and
+several of them cover half the screen or more, drawn additively one over
+another; the clip masks are the water layers' (`TextureRect3`–`5` in
+`underdocks_bg_04_b`) that keep the shimmer inside the water; and the base
+water layers carry a ripple shader (`vfx_water_reflection`). That's the
+difference from Overgrowth.
+
+**Background animation → Off** (the old Background sway, in Recommended)
+now stills all of it: the shimmer sprites aren't drawn, a clip mask that
+held nothing but shimmer draws as a plain layer (no offscreen pass), and
+the ripple shader comes off the water layers. The water and the rest of the
+art stay as they are. A stand-in for that background in Godot 4.5.1 on a
+desktop (19 additive two-noise shader sprites, each about half the screen,
+in three clip masks over six full-screen layers, 2560×1600, software
+Vulkan): 655 ms per frame as the game draws it, 195 ms stilled; hiding the
+shimmer alone, 215 ms. And with **Particles → Off**, the background's 22–25
+emitters (and every other one) aren't drawn either: with nothing to emit,
+Godot still updated each on the GPU every frame, because it updates
+particles that are drawn.
 
 ### Scene probe: what the GPU spends its time on
 

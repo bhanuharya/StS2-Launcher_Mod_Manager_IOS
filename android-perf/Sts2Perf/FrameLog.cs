@@ -259,7 +259,16 @@ internal static class FrameLog
 
         if (ms >= SuspendedMs)
         {
-            PerfEntry.Log($"frame log: {ms / 1000:0.0} s gap (app in the background?), starting a new window");
+            // Usually the app was in the background. When it wasn't (a 0.4.2.18
+            // log had 4-8 s stalls mid-fight), this is what the frame did.
+            var d = counters.Since(_frameStart);
+            var causes = HitchCauses(d);
+            if (d.JitMethods > 0)
+                causes.Insert(0, $"jit +{d.JitMethods} methods {d.JitMs:0} ms");
+            PerfEntry.Log(
+                $"frame log: {ms / 1000:0.0} s gap (app in the background, or a stall: "
+                    + $"{(causes.Count > 0 ? string.Join("; ", causes) : "nothing counted")} | logic {_frameLogicMs:0} draw {_frameDrawMs:0} other {Math.Max(0, ms - _frameLogicMs - _frameDrawMs):0} ms), starting a new window"
+            );
             _windowStartUsec = now;
             _frameStartUtc = nowUtc;
             _frameStart = _windowStart = counters;

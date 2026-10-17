@@ -21,8 +21,20 @@ namespace STS2Perf;
 // card_trails=off hides the trail drawn behind cards flying to a pile
 // (card_trail_*.tscn); frames ran at ~90 ms while a discarded hand flew off.
 //
-// bg_sway=off detaches the wind_sway shader from the background foliage, so
-// it stands still instead of being reshaded every frame.
+// bg_sway=off (Perf settings → Background animation) stills the fight's
+// background:
+// - the wind_sway shader comes off the foliage, so it stands still instead
+//   of being reshaded every frame;
+// - Underdocks' water shimmer goes: 18-20 sprites (water_reflection*) drawn
+//   additively with the stepped fire shader, several of them covering half
+//   the screen or more, inside 7-9 clip masks, each of which Godot draws
+//   offscreen first. Those fights ran the GPU at 38-58 ms per frame at full
+//   resolution on a Pad 5 (17-20 fps in a 0.4.2.18 log) against 12-14 ms for
+//   Overgrowth's. The sprites are hidden, and a clip mask that held nothing
+//   else draws as a plain layer again;
+// - the vfx_water_reflection ripple shader comes off its water layers.
+// The art itself stays; only its animation goes. Done through the
+// RenderingServer, so the game's nodes keep their own settings.
 //
 // All apply to what's already on screen and to new nodes as they appear.
 internal static class CardFx
@@ -30,6 +42,8 @@ internal static class CardFx
     private const string CardScene = "card.tscn";
     private const string TrailPrefix = "card_trail";
     private const string SwayShader = "wind_sway.gdshader";
+    private const string ShimmerShader = "vfx_stepped_shader_fire_add.tres";
+    private const string RippleShader = "vfx_water_reflection.gdshader";
 
     private static bool _hooked;
     private static bool _swept;
@@ -37,6 +51,8 @@ internal static class CardFx
     private static bool _trailsHidden;
     private static bool _swayOff;
     private static readonly List<CanvasItem> Sways = new();
+    private static readonly List<CanvasItem> Shimmers = new();
+    private static readonly List<CanvasItem> ClipParents = new();
     private static readonly List<CanvasGroup> Groups = new();
     private static readonly List<CanvasItem> Trails = new();
 
@@ -72,6 +88,8 @@ internal static class CardFx
         Groups.RemoveAll(g => !GodotObject.IsInstanceValid(g));
         Trails.RemoveAll(t => !GodotObject.IsInstanceValid(t));
         Sways.RemoveAll(s => !GodotObject.IsInstanceValid(s));
+        Shimmers.RemoveAll(s => !GodotObject.IsInstanceValid(s));
+        ClipParents.RemoveAll(c => !GodotObject.IsInstanceValid(c));
         // Re-applied every tick: a CanvasGroup resets its mode when the game
         // changes one of its properties. Untouched unless on, or just turned off.
         if (fast || _fastApplied)
@@ -81,12 +99,18 @@ internal static class CardFx
             foreach (var trail in Trails)
                 SetTrail(trail, !hideTrails);
         if (swayOff || _swayOff)
+        {
             foreach (var sway in Sways)
                 SetSway(sway, !swayOff);
+            foreach (var shimmer in Shimmers)
+                SetShimmer(shimmer, !swayOff);
+            foreach (var parent in ClipParents)
+                SetClip(parent, !swayOff);
+        }
         if (fast != _fastApplied || hideTrails != _trailsHidden || swayOff != _swayOff)
             PerfEntry.Log(
-                $"visuals: cards {(fast ? "fast (no offscreen pass)" : "as the game")}, card trails {(hideTrails ? "off" : "on")}, background sway {(swayOff ? "off" : "on")}"
-                    + $" ({Groups.Count} card groups, {Trails.Count} trails, {Sways.Count} swaying layers now, new ones as they appear)"
+                $"visuals: cards {(fast ? "fast (no offscreen pass)" : "as the game")}, card trails {(hideTrails ? "off" : "on")}, background animation {(swayOff ? "off" : "on")}"
+                    + $" ({Groups.Count} card groups, {Trails.Count} trails, {Sways.Count} swaying layers, {Shimmers.Count} shimmer sprites now, new ones as they appear)"
             );
         _fastApplied = fast;
         _trailsHidden = hideTrails;
@@ -99,6 +123,8 @@ internal static class CardFx
             Groups.Clear();
             Trails.Clear();
             Sways.Clear();
+            Shimmers.Clear();
+            ClipParents.Clear();
         }
     }
 
@@ -128,13 +154,40 @@ internal static class CardFx
             if (_trailsHidden)
                 SetTrail(item, false);
         }
-        else if (node is CanvasItem swaying && swaying.Material is ShaderMaterial { Shader: { } shader }
-                 && shader.ResourcePath.EndsWith(SwayShader, StringComparison.Ordinal))
+        else if (node is CanvasItem animated && animated.Material is ShaderMaterial { Shader: { } shader })
         {
-            Sways.Add(swaying);
-            if (_swayOff)
-                SetSway(swaying, false);
+            var path = shader.ResourcePath;
+            if (path.EndsWith(SwayShader, StringComparison.Ordinal)
+                || (path.EndsWith(RippleShader, StringComparison.Ordinal) && InBackground(animated)))
+            {
+                Sways.Add(animated);
+                if (_swayOff)
+                    SetSway(animated, false);
+            }
+            else if (path.EndsWith(ShimmerShader, StringComparison.Ordinal) && InBackground(animated))
+            {
+                Shimmers.Add(animated);
+                if (_swayOff)
+                    SetShimmer(animated, false);
+                if (animated.GetParent() is CanvasItem parent && parent.ClipChildren != CanvasItem.ClipChildrenMode.Disabled
+                    && !ClipParents.Contains(parent))
+                {
+                    ClipParents.Add(parent);
+                    // Its other children may not be in the tree yet.
+                    Callable.From(() => { if (_swayOff && GodotObject.IsInstanceValid(parent)) SetClip(parent, false); }).CallDeferred();
+                }
+            }
         }
+    }
+
+    // Part of a fight's background scene (underdocks_background.tscn, a boss's
+    // *_background.tscn).
+    private static bool InBackground(Node node)
+    {
+        for (var n = node.GetParent(); n != null; n = n.GetParent())
+            if (SceneFile(n).EndsWith("_background.tscn", StringComparison.Ordinal))
+                return true;
+        return false;
     }
 
     internal static bool InCard(Node node)
@@ -179,4 +232,36 @@ internal static class CardFx
 
     private static void SetSway(CanvasItem item, bool asGame) =>
         RenderingServer.CanvasItemSetMaterial(item.GetCanvasItem(), asGame ? item.Material?.GetRid() ?? new Rid() : new Rid());
+
+    private static void SetShimmer(CanvasItem item, bool asGame) =>
+        RenderingServer.CanvasItemSetVisible(item.GetCanvasItem(), asGame && item.Visible);
+
+    // A clip mask whose children are all shimmer: drawn as a plain layer
+    // (AndDraw) or not at all (Only, a mask that isn't drawn itself).
+    private static void SetClip(CanvasItem parent, bool asGame)
+    {
+        var item = parent.GetCanvasItem();
+        var onlyShimmer = true;
+        foreach (var child in parent.GetChildren())
+            if (child is CanvasItem c && c.Visible && !Shimmers.Contains(c))
+                onlyShimmer = false;
+        if (asGame || !onlyShimmer)
+        {
+            RenderingServer.CanvasItemSetVisible(item, parent.Visible);
+            RenderingServer.CanvasItemSetCanvasGroupMode(
+                item,
+                parent.ClipChildren == CanvasItem.ClipChildrenMode.Only
+                    ? RenderingServer.CanvasGroupMode.ClipOnly
+                    : RenderingServer.CanvasGroupMode.ClipAndDraw
+            );
+        }
+        else if (parent.ClipChildren == CanvasItem.ClipChildrenMode.Only)
+        {
+            RenderingServer.CanvasItemSetVisible(item, false);
+        }
+        else
+        {
+            RenderingServer.CanvasItemSetCanvasGroupMode(item, RenderingServer.CanvasGroupMode.Disabled);
+        }
+    }
 }
