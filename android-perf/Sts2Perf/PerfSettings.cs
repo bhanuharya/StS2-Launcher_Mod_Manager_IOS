@@ -15,7 +15,8 @@ namespace STS2Perf;
 //   effects=on|off              off: HDR 2D, FXAA, debanding off
 //   max_fps=0|<n>               0 = the game's FPS limit setting
 //   vsync=game|on|off|adaptive|mailbox
-//   particles=<0-100>           % of particles emitted (100 = as designed)
+//   particles=<0-100>           % of particles emitted (100 = as designed;
+//                               0: emitters aren't drawn at all)
 //   frame_log=<seconds>         frame-time stats line every N s, plus a
 //                               line per hitch with its causes; 0 = off
 //   jit_warmup=off|on           on: compile the game's code at the main menu
@@ -27,7 +28,8 @@ namespace STS2Perf;
 //   card_fx=game|fast           fast: cards draw without their offscreen
 //                               CanvasGroup pass (CardFx)
 //   card_trails=on|off          off: no trails behind flying cards
-//   bg_sway=on|off              off: background foliage stands still
+//   bg_sway=on|off              off: the fight background stands still
+//                               (foliage sway, water shimmer and ripples)
 //   cpu_probe=off|on            on: the frame log times the game's scripts
 //   asset_cache=game|keep       keep: the game stops unloading the assets it
 //                               loaded on the spot (AssetKeep)
@@ -41,9 +43,6 @@ namespace STS2Perf;
 //   collision_map=game|light    light: the 2D distance field particles
 //                               collide against at 25% resolution, no margin
 //                               (CollisionMap)
-//   gc=game|background          background: Mono's concurrent collector for
-//                               major collections, from the next start
-//                               (GcTuning)
 //   export=off|at_menu          at_menu: once the game is up, write the game's
 //                               code and scenes to StS2LauncherMM/Export
 //                               (GameExport), then back to off
@@ -111,7 +110,6 @@ internal static class PerfSettings
             "spine_rate" => Raw("spine_rate") ?? "game",
             "text_fx" => Raw("text_fx") ?? "game",
             "collision_map" => Raw("collision_map") ?? "game",
-            "gc" => Raw("gc") ?? "game",
             "export" => Raw("export") ?? "off",
             _ => Raw(key),
         };
@@ -195,7 +193,6 @@ internal static class PerfSettings
             $"creature animation {Value("spine_rate")}",
             $"text colors {Value("text_fx")}",
             $"particle collisions {Value("collision_map")}",
-            $"garbage collector {Value("gc")}",
             $"cpu breakdown {Value("cpu_probe")}",
             $"frame log {(FrameLogSeconds > 0 ? FrameLogSeconds + "s" : "off")}",
             $"jit warm-up {Value("jit_warmup")}",

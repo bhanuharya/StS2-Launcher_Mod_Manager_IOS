@@ -42,6 +42,8 @@ internal static class PerfRuntime
     private static DisplayServer.VSyncMode? _stockVsync;
     private static readonly Dictionary<string, Variant> StockProperties = new();
     private static int _particlesApplied = 100;
+    // Off (0%): emitters aren't drawn at all (see ApplyParticles).
+    private static readonly List<CanvasItem> HiddenEmitters = new();
     private static bool _nodeAddedHooked;
     private static readonly HashSet<string> Logged = new();
 
@@ -298,11 +300,28 @@ internal static class PerfRuntime
         }
     }
 
+    // Scales every emitter's amount. At 0% an emitter is also not drawn
+    // (through the RenderingServer; the node stays visible to the game): an
+    // emitter with nothing to emit still costs its draw call and, as Godot
+    // updates GPU particles only when they're drawn, its particle update
+    // pass on the GPU every frame (22-25 emitters in an Underdocks fight's
+    // background alone). Re-hidden every tick, as the game showing a node
+    // again shows it to the renderer too.
     private static void ApplyParticles(SceneTree tree)
     {
         var percent = PerfSettings.ParticlesPercent;
+        HiddenEmitters.RemoveAll(e => !GodotObject.IsInstanceValid(e));
+        if (percent == 0)
+            foreach (var emitter in HiddenEmitters)
+                RenderingServer.CanvasItemSetVisible(emitter.GetCanvasItem(), false);
         if (percent == _particlesApplied)
             return;
+        if (_particlesApplied == 0)
+        {
+            foreach (var emitter in HiddenEmitters)
+                RenderingServer.CanvasItemSetVisible(emitter.GetCanvasItem(), emitter.Visible);
+            HiddenEmitters.Clear();
+        }
         _particlesApplied = percent;
 
         var count = 0;
@@ -310,7 +329,7 @@ internal static class PerfRuntime
             count += ScaleParticles(node) ? 1 : 0;
         foreach (var node in tree.Root.FindChildren("*", "CPUParticles2D", true, false))
             count += ScaleParticles(node) ? 1 : 0;
-        PerfEntry.Log($"particles {percent}% ({count} emitters now, new ones as they appear)");
+        PerfEntry.Log($"particles {percent}% ({count} emitters now, new ones as they appear{(percent == 0 ? "; not drawn" : "")})");
 
         // New emitters get scaled as they enter the tree.
         if (percent < 100 && !_nodeAddedHooked)
@@ -346,6 +365,7 @@ internal static class PerfRuntime
                 if (!gpu.HasMeta(ParticleRatioMeta))
                     gpu.SetMeta(ParticleRatioMeta, gpu.AmountRatio);
                 gpu.AmountRatio = (float)gpu.GetMeta(ParticleRatioMeta) * factor;
+                HideIfOff(gpu);
                 return true;
             case CpuParticles2D cpu:
                 if (!cpu.HasMeta(ParticleAmountMeta))
@@ -353,10 +373,24 @@ internal static class PerfRuntime
                 var amount = Math.Max(1, (int)Math.Round((int)cpu.GetMeta(ParticleAmountMeta) * factor));
                 if (cpu.Amount != amount)
                     cpu.Amount = amount;
+                HideIfOff(cpu);
                 return true;
             default:
                 return false;
         }
+    }
+
+    // Only an emitter with nothing drawn under it: hiding one hides its
+    // children too.
+    private static void HideIfOff(CanvasItem emitter)
+    {
+        if (_particlesApplied != 0 || HiddenEmitters.Contains(emitter))
+            return;
+        foreach (var child in emitter.GetChildren())
+            if (child is CanvasItem)
+                return;
+        RenderingServer.CanvasItemSetVisible(emitter.GetCanvasItem(), false);
+        HiddenEmitters.Add(emitter);
     }
 
     private static void ApplyProperties(Window root)

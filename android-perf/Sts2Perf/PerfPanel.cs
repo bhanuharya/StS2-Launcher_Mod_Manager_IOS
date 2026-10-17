@@ -39,12 +39,11 @@ internal static class PerfPanel
         new("card_fx", "Card rendering", new Option[] { new("game", "As the game"), new("fast", "Fast (no ripple)") }),
         new("card_trails", "Card trails", new Option[] { new("on", "On"), new("off", "Off") }),
         new("idle_overlay", "Idle transition layer", new Option[] { new("draw", "Draw (game)"), new("skip", "Skip") }),
-        new("bg_sway", "Background sway", new Option[] { new("on", "On"), new("off", "Off (still)") }),
+        new("bg_sway", "Background animation", new Option[] { new("on", "On"), new("off", "Off (still)") }),
         new("asset_cache", "Keep loaded assets", new Option[] { new("game", "As the game"), new("keep", "Keep (fewer hitches)") }),
         new("combat_ui", "Combat UI refresh", new Option[] { new("game", "Every frame (game)"), new("limited", "10 per second") }),
         new("text_fx", "Text colors", new Option[] { new("game", "Game's effects"), new("native", "Built-in (same look)") }),
         new("collision_map", "Particle collisions", new Option[] { new("game", "Game's map"), new("light", "Light map (faster)") }),
-        new("gc", "Garbage collector (next start)", new Option[] { new("game", "Mono's default"), new("background", "Concurrent (short pauses)") }),
         new("spine_rate", "Creature animation", new Option[] { new("game", "Every frame (game)"), new("half", "Every 2nd frame"), new("third", "Every 3rd frame") }),
         new("frame_log", "Frame-time log", new Option[]
         {
@@ -63,7 +62,6 @@ internal static class PerfPanel
     {
         ("card_fx", "fast"), ("card_trails", "off"), ("idle_overlay", "skip"), ("bg_sway", "off"), ("effects", "off"),
         ("asset_cache", "keep"), ("combat_ui", "limited"), ("text_fx", "native"), ("collision_map", "light"),
-        ("gc", "background"),
     };
 
     private static readonly List<(Row Row, StyledButton Button)> Buttons = new();

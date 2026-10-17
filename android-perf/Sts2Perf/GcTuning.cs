@@ -5,36 +5,29 @@ using System.Linq;
 
 namespace STS2Perf;
 
-// gc=game|background (Perf settings → Garbage collector), and Mono's own log
-// of its collections while the frame log is on. Both take effect the next
-// time the app starts.
+// Mono's own log of each garbage collection, while the frame log is on,
+// from the next time the app starts:
 //
-// The game's .NET code runs on Mono, whose garbage collector stops the game
-// while it collects. A 0.4.2.17 log from a Pad 5, 24 minutes: 516 minor
-// collections (one every ~3 s in fights, the frames they land in mostly
-// 45-65 ms) and 49 major ones, those frames ~290 ms on average. Godot starts
-// Mono with Mono's defaults, and on Android those collect the old generation
-// (major) all at once. background sets MONO_GC_PARAMS=major=marksweep-conc:
-// Mono's concurrent collector, which marks on another core while the game
-// keeps running and stops it only briefly to start and finish, as .NET's
-// own Android apps do by default (AndroidEnableSGenConcurrent). Minor
-// collections stay as they are: a bigger nursery was tried in a desktop
-// test of Mono with a heap like Godot's (finalizable wrappers, references
-// from old objects to new ones), and it made them rarer but each one about
-// as much longer, as most of what they copy grows with the nursery.
+//   Mono: GC_MINOR: (Nursery full) time 6.86ms, stw 8.11ms promoted 603K major size: 67744K ...
+//   Mono: GC_MAJOR_CONCURRENT_START: (LOS overflow)
+//   Mono: GC_MAJOR: (user request) time 104.51ms, stw 110.07ms ...
 //
-// Mono reads these from the environment once, as it starts, before any of
-// the add-on runs. So the add-on writes them to <files dir>/sts2perf_env and
-// the app's startup provider (java/com/sts2perf/StartupEnv.java) sets them
-// on the next start; it also sets STS2PERF_FILES_DIR, which is how this
-// knows the provider is there. If a start with them never reaches the
-// add-on, the next start goes without them once (StartupEnv). With the frame log on, the file also turns
-// on Mono's log of each collection (MONO_LOG_LEVEL=debug, MONO_LOG_MASK=gc),
-// which lands in the log next to the add-on's lines with the real pause and
-// what survived it:
+// stw is how long the game was stopped. Mono reads its log settings
+// (MONO_LOG_LEVEL=debug, MONO_LOG_MASK=gc) from the environment once, as it
+// starts, before any of the add-on runs. So the add-on writes them to
+// <files dir>/sts2perf_env and the app's startup provider
+// (java/com/sts2perf/StartupEnv.java) sets them on the next start; it also
+// sets STS2PERF_FILES_DIR, which is how this knows the provider is there.
+// If a start with them never reaches the add-on, the next start goes
+// without them once (StartupEnv).
 //
-//   Mono: GC_MINOR: (Nursery full) time 41.20ms, stw 42.01ms promoted 1203K major size: 210432K ...
-//   Mono: GC_MAJOR_CONCURRENT_START: (Minor allowance)
+// What the first such log (0.4.2.18, Pad 5) showed: minor collections stop
+// the game for 6-10 ms, sometimes 17-50; the major heap is ~60-70 MB; and
+// Mono here already collects it concurrently (GC_MAJOR_CONCURRENT_*). The
+// long ones are the game's own GC.Collect() after each room's assets load
+// (PreloadManager), 100-150 ms during the room transition. 0.4.2.18 had a
+// setting for MONO_GC_PARAMS=major=marksweep-conc, which turned out to be
+// what Mono does anyway; it's gone, and the file no longer sets it.
 internal static class GcTuning
 {
     private const string FileName = "sts2perf_env";
@@ -45,15 +38,13 @@ internal static class GcTuning
 
     private static string Dir => Environment.GetEnvironmentVariable("STS2PERF_FILES_DIR");
 
-    // True when the app's startup provider ran this time, so the setting can work.
+    // True when the app's startup provider ran this time.
     public static bool Available => !string.IsNullOrEmpty(Dir);
 
     // What the settings ask Mono to start with.
     private static Dictionary<string, string> Wanted()
     {
         var env = new Dictionary<string, string>();
-        if (PerfSettings.Value("gc") == "background")
-            env["MONO_GC_PARAMS"] = "major=marksweep-conc";
         if (PerfSettings.FrameLogSeconds > 0)
         {
             env["MONO_LOG_LEVEL"] = "debug";
@@ -88,7 +79,7 @@ internal static class GcTuning
                 .ToDictionary(e => e.n, e => e.Item2);
             PerfEntry.Log(
                 Available
-                    ? $"garbage collector: {PerfSettings.Value("gc")} (this run started with {Describe(now)})"
+                    ? $"garbage collector: this run started with {Describe(now)}"
                     : "garbage collector: the app's startup provider didn't run, so Mono runs with its defaults"
             );
         }
